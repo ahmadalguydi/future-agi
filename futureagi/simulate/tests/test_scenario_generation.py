@@ -1060,7 +1060,7 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids", return_value=[]
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample", return_value=[]
         ):
             payload = build_agent_kb_payload(agent_definition, "anything")
 
@@ -1078,7 +1078,7 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=[
                 "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
                 "e6c1fd97-0444-4292-9165-023cc80dce6a",
@@ -1107,7 +1107,7 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             side_effect=RuntimeError("boom"),
         ):
             payload = build_agent_kb_payload(agent_definition, "anything")
@@ -1140,7 +1140,7 @@ class TestKnowledgeBaseWiring:
         ) as mock_agent_cls, patch(
             "simulate.tasks.scenario_tasks.close_old_connections"
         ), patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             agent = mock_agent_cls.return_value
@@ -1271,7 +1271,7 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids", return_value=[]
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample", return_value=[]
         ):
             assert build_kb_payload("kb-uuid", "desc") is None
 
@@ -1279,7 +1279,7 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import KB_TABLE_NAME, build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=[
                 "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
                 "e6c1fd97-0444-4292-9165-023cc80dce6a",
@@ -1300,7 +1300,7 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             side_effect=RuntimeError("boom"),
         ):
             assert build_kb_payload("kb-uuid", "desc") is None
@@ -1316,7 +1316,7 @@ class TestBuildKbPayload:
             "e6c1fd97-0444-4292-9165-023cc80dce6a",
         ]
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=chunks,
         ):
             for desc in ("", "   ", None):
@@ -1331,7 +1331,7 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["c", "f", "d", "cfd0e8a2-3064-489a-bf3f-43c430680f44"],
         ):
             payload = build_kb_payload("kb-uuid", "desc")
@@ -1348,13 +1348,32 @@ class TestBuildKbPayload:
             "e6c1fd97-0444-4292-9165-023cc80dce6a",
         ]
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=chunks,
         ):
             p1 = build_kb_payload("kb-uuid", "Enterprise onboarding")
             p2 = build_kb_payload("kb-uuid", "Refund from angry customer")
         assert p1 == p2
         assert p1["doc_ids"] == chunks
+
+    def test_payload_size_is_capped_for_large_kbs(self):
+        """Prod-safety: KB_DOC_ID_PAYLOAD_CAP bounds the payload so a huge KB
+        cannot blow past the Temporal 4 MiB activity payload cap."""
+        from model_hub.utils.kb_indexer import (
+            KB_DOC_ID_PAYLOAD_CAP,
+            build_kb_payload,
+        )
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample"
+        ) as mock_sample:
+            build_kb_payload("kb-uuid", "any desc")
+        mock_sample.assert_called_once()
+        args, _ = mock_sample.call_args
+        assert args[0] == "kb-uuid"
+        assert args[1] == KB_DOC_ID_PAYLOAD_CAP
+        # Cap must be defensively small (18 KB at 500 uuids, << 4 MiB Temporal cap)
+        assert KB_DOC_ID_PAYLOAD_CAP <= 5000
 
 
 class TestBuildAgentKbPayloadVersionPin:
@@ -1406,7 +1425,7 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             payload = build_agent_kb_payload(
@@ -1429,7 +1448,7 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
             payload = build_agent_kb_payload(
@@ -1458,7 +1477,7 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_all_kb_doc_ids",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
             payload = build_agent_kb_payload(
