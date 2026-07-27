@@ -1607,7 +1607,11 @@ def _deprecated_create_script_scenario_background_task(validated_data, scenario_
         no_of_rows = validated_data.get("no_of_rows", 20)
         script_url = validated_data.get("script_url")
         agent_definition_id = validated_data.get("agent_definition_id")
-        persona_ids = validated_data.get("personas", [])
+        persona_ids = (
+            []
+            if validated_data.get("add_persona_automatically", False)
+            else validated_data.get("personas", [])
+        )
         custom_columns = validated_data.get("custom_columns", [])
 
         # persona_ids = ['c82e9449-ea6b-4d1c-ae33-f18378528cc3','cc55a95d-1334-42ce-a3fb-6be23c26f53c']
@@ -1701,7 +1705,11 @@ def _deprecated_create_graph_scenario_background_task(validated_data, scenario_i
         generate_graph = validated_data.get("generate_graph", False)
         graph_data = validated_data.get("graph")
         no_of_rows = validated_data.get("no_of_rows", 20)
-        persona_ids = validated_data.get("personas", [])
+        persona_ids = (
+            []
+            if validated_data.get("add_persona_automatically", False)
+            else validated_data.get("personas", [])
+        )
         custom_columns = validated_data.get("custom_columns", [])
 
         # persona_ids = ['c82e9449-ea6b-4d1c-ae33-f18378528cc3','cc55a95d-1334-42ce-a3fb-6be23c26f53c']

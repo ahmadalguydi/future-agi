@@ -362,6 +362,8 @@ def generate_scenario_rows(
                 metadata = json.loads(metadata)
             persona_ids = metadata.get("persona_ids", None)
             custom_instruction = metadata.get("custom_instruction", None)
+            if metadata.get("add_persona_automatically"):
+                persona_ids = None
         # Get agent definition for constraints
         agent_definition = scenario.agent_definition
 
