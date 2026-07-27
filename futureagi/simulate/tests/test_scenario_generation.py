@@ -1429,6 +1429,116 @@ class TestColumnDefinitionSerializerProperty:
         assert ser.is_valid(), ser.errors
 
 
+class TestResolveConfigurationSnapshot:
+    """Shared helper used at every prompt-construction site to load the pinned
+    version's snapshot from a scenario."""
+
+    def test_none_scenario_returns_none(self):
+        from simulate.models.agent_version import resolve_configuration_snapshot
+
+        assert resolve_configuration_snapshot(None) is None
+
+    def test_scenario_without_version_id_returns_none(self, db, agent_definition, organization, workspace):
+        from simulate.models.agent_version import resolve_configuration_snapshot
+
+        scenario = Scenarios.objects.create(
+            name="s", source="x", scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition, metadata={},
+        )
+        assert resolve_configuration_snapshot(scenario) is None
+
+    def test_scenario_with_version_returns_snapshot(self, db, agent_definition, organization, workspace):
+        from simulate.models.agent_version import AgentVersion, resolve_configuration_snapshot
+
+        snap = {"agent_name": "Pinned"}
+        v = AgentVersion.objects.create(
+            agent_definition=agent_definition, organization=organization,
+            workspace=workspace, version_number=1, configuration_snapshot=snap,
+        )
+        scenario = Scenarios.objects.create(
+            name="s", source="x", scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(v.id)},
+        )
+        assert resolve_configuration_snapshot(scenario) == snap
+
+    def test_missing_version_returns_none(self, db, agent_definition, organization, workspace):
+        import uuid as _uuid
+        from simulate.models.agent_version import resolve_configuration_snapshot
+
+        scenario = Scenarios.objects.create(
+            name="s", source="x", scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(_uuid.uuid4())},
+        )
+        assert resolve_configuration_snapshot(scenario) is None
+
+
+class TestGenerateScenarioColumnsVersionPin:
+    """Add-columns flow: generate_scenario_columns must honor the version pin
+    when building the SDA prompt for new column values."""
+
+    def _make_scenario_with_version(self, db, agent_definition, organization, workspace, snapshot):
+        from simulate.models.agent_version import AgentVersion
+
+        dataset = Dataset.no_workspace_objects.create(
+            name="ds", organization=organization, workspace=workspace,
+            source=DatasetSourceChoices.SCENARIO.value,
+        )
+        Row.objects.create(dataset=dataset, order=0)
+        v = AgentVersion.objects.create(
+            agent_definition=agent_definition, organization=organization,
+            workspace=workspace, version_number=1, configuration_snapshot=snapshot,
+        )
+        scenario = Scenarios.objects.create(
+            name="scn", source="x", scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition, dataset=dataset,
+            metadata={"agent_definition_version_id": str(v.id)},
+        )
+        return scenario, dataset
+
+    def test_snapshot_agent_name_reaches_column_gen_payload(
+        self, db, agent_definition, organization, workspace
+    ):
+        from simulate.tasks.scenario_tasks import generate_scenario_columns
+
+        agent_definition.agent_name = "Live Bot"
+        agent_definition.save(update_fields=["agent_name"])
+        scenario, dataset = self._make_scenario_with_version(
+            db, agent_definition, organization, workspace,
+            snapshot={"agent_name": "Pinned Bot v1"},
+        )
+
+        captured = {}
+
+        async def fake_generate_column_data(payload, **kwargs):
+            captured["payload"] = payload
+            import pandas as _pd
+            return _pd.DataFrame([{"c1": "x"}])
+
+        with patch(
+            "simulate.tasks.scenario_tasks.SyntheticDataAgent"
+        ) as mock_cls, patch(
+            "simulate.tasks.scenario_tasks.close_old_connections"
+        ):
+            mock_cls.return_value.generate_column_data = fake_generate_column_data
+            generate_scenario_columns(
+                dataset_id=dataset.id,
+                new_columns_required_info=[
+                    {"name": "c1", "data_type": "text", "description": "x"}
+                ],
+                scenario_id=scenario.id,
+            )
+
+        objective = captured["payload"]["requirements"]["Objective"]
+        assert "Pinned Bot v1" in objective
+        assert "Live Bot" not in objective
+
+
 class TestBuildSdaPayloadVersionPin:
     """Dataset scenario flow: `_build_sda_payload` must honor the version pin
     when constructing the SDA prompt."""

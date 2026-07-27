@@ -19,6 +19,25 @@ def pinned_or_live(configuration_snapshot, agent_definition, field_name):
     return getattr(agent_definition, field_name, None)
 
 
+def resolve_configuration_snapshot(scenario):
+    """Load the AgentVersion.configuration_snapshot pinned by a scenario, or None.
+
+    Reads scenario.metadata["agent_definition_version_id"] and returns the
+    version's snapshot dict. Callers pair this with pinned_or_live to honor
+    the pin at prompt-construction sites.
+    """
+    if scenario is None:
+        return None
+    metadata = getattr(scenario, "metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return None
+    version_id = metadata.get("agent_definition_version_id")
+    if not version_id:
+        return None
+    v = AgentVersion.objects.filter(id=version_id).first()
+    return v.configuration_snapshot if v else None
+
+
 class AgentVersion(BaseModel):
     """
     Model to store different versions of agent definitions

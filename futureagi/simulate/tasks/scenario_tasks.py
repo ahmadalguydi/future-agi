@@ -93,9 +93,15 @@ def generate_scenario_columns(
         dataset_description = dataset_metadata.get("description") or getattr(
             scenario, "description", ""
         )
-        agent_name = getattr(agent_definition, "agent_name", "")
-        agent_description = getattr(agent_definition, "description", "")
-        agent_language = getattr(agent_definition, "language", "")
+        from simulate.models.agent_version import (
+            pinned_or_live,
+            resolve_configuration_snapshot,
+        )
+
+        _snap = resolve_configuration_snapshot(scenario)
+        agent_name = pinned_or_live(_snap, agent_definition, "agent_name") or ""
+        agent_description = pinned_or_live(_snap, agent_definition, "description") or ""
+        agent_language = pinned_or_live(_snap, agent_definition, "language") or ""
         dataset_objective = dataset_metadata.get("objective") or (
             f"Generate realistic values for the newly added columns within scenario '{scenario.name}' "
             f"for agent '{agent_name}' focused on {agent_description}."
