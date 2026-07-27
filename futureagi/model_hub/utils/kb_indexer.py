@@ -32,6 +32,27 @@ KB_INDEX_COL_TYPE = "text"
 KB_INDEX_COL_NAME = "chunk_text"
 
 
+def build_kb_payload(kb_id, description):
+    """Resolve a KB UUID + description into the SDA payload shape, or None.
+
+    Shared primitive: both agent-driven (scenario generation) and dataset-
+    driven (eval synthetic data) callers land on the same shape.
+    """
+    if not kb_id:
+        return None
+    try:
+        doc_ids = [
+            str(d)
+            for d in (KBIndexer().get_subset_kb_id(description or "", str(kb_id)) or [])
+        ]
+    except Exception as exc:
+        logger.warning("kb_payload_resolve_failed", kb_id=str(kb_id), error=str(exc))
+        return None
+    if not doc_ids:
+        return None
+    return {"table_name": KB_TABLE_NAME, "kb_id": str(kb_id), "doc_ids": doc_ids}
+
+
 def build_agent_kb_payload(agent_definition, description, scenario=None):
     """Resolve the agent's KB into the SDA payload shape, or None.
 
@@ -54,19 +75,7 @@ def build_agent_kb_payload(agent_definition, description, scenario=None):
                     kb_id = v.configuration_snapshot.get("knowledge_base")
     if not kb_id and not version_pinned:
         kb_id = getattr(agent_definition, "knowledge_base_id", None)
-    if not kb_id:
-        return None
-    try:
-        doc_ids = [
-            str(d)
-            for d in (KBIndexer().get_subset_kb_id(description or "", str(kb_id)) or [])
-        ]
-    except Exception as exc:
-        logger.warning("agent_kb_payload_resolve_failed", kb_id=str(kb_id), error=str(exc))
-        return None
-    if not doc_ids:
-        return None
-    return {"table_name": KB_TABLE_NAME, "kb_id": str(kb_id), "doc_ids": doc_ids}
+    return build_kb_payload(kb_id, description)
 
 
 @dataclass

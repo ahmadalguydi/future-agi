@@ -1247,6 +1247,47 @@ class TestPinnedOrLiveHelper:
         )
 
 
+class TestBuildKbPayload:
+    """Extracted primitive used by both scenario generation and eval synthetic data."""
+
+    def test_none_kb_id_returns_none(self):
+        from model_hub.utils.kb_indexer import build_kb_payload
+
+        assert build_kb_payload(None, "any description") is None
+
+    def test_empty_doc_ids_returns_none(self):
+        from model_hub.utils.kb_indexer import build_kb_payload
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id", return_value=[]
+        ):
+            assert build_kb_payload("kb-uuid", "desc") is None
+
+    def test_returns_shaped_dict_when_docs_present(self):
+        from model_hub.utils.kb_indexer import KB_TABLE_NAME, build_kb_payload
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["d-1", "d-2"],
+        ):
+            payload = build_kb_payload("kb-uuid", "desc")
+
+        assert payload == {
+            "table_name": KB_TABLE_NAME,
+            "kb_id": "kb-uuid",
+            "doc_ids": ["d-1", "d-2"],
+        }
+
+    def test_indexer_exception_returns_none(self):
+        from model_hub.utils.kb_indexer import build_kb_payload
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            side_effect=RuntimeError("boom"),
+        ):
+            assert build_kb_payload("kb-uuid", "desc") is None
+
+
 class TestBuildAgentKbPayloadVersionPin:
     """Version pin is authoritative: null snapshot KB means no KB, not fall-through."""
 

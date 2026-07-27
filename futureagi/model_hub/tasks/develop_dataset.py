@@ -45,7 +45,7 @@ from model_hub.models.develop_dataset import (
 )
 from model_hub.serializers.develop_dataset import ColumnSerializer
 from model_hub.utils.kb_helpers import is_kb_deleted_or_cancelled
-from model_hub.utils.kb_indexer import KB_TABLE_NAME, KBIndexer
+from model_hub.utils.kb_indexer import KB_TABLE_NAME, KBIndexer, build_kb_payload
 from model_hub.utils.synthetic_task_manager import SyntheticTaskManager
 from tfc.temporal import temporal_activity
 from tfc.utils.storage import (
@@ -414,23 +414,11 @@ def create_synthetic_dataset(
             },
             "batch_size": validated_data["num_rows"],
         }
-        kb_id = validated_data.get("kb_id", None)
-        if kb_id:
-            indexer = KBIndexer()
-            doc_ids = indexer.get_subset_kb_id(
-                validated_data["dataset"]["description"], kb_id
-            )
-            doc_ids = [str(u) for u in doc_ids]
-            if doc_ids:
-                payload.update(
-                    {
-                        "knowledge_base": {
-                            "table_name": KB_TABLE_NAME,
-                            "kb_id": kb_id,
-                            "doc_ids": doc_ids,
-                        }
-                    }
-                )
+        kb_payload = build_kb_payload(
+            validated_data.get("kb_id"), validated_data["dataset"]["description"]
+        )
+        if kb_payload:
+            payload["knowledge_base"] = kb_payload
 
         logger.info(f"payload: {payload}")
 
