@@ -945,11 +945,11 @@ def _add_scenario_columns(
     existing_column_names: set,
     agent_definition,
     mode: str,
+    custom_columns: list | None = None,
 ) -> dict:
-    """Add scenario-specific columns to the dataset.
-
-    Returns:
-        Dict mapping column names to their IDs.
+    """Add scenario-specific columns to the dataset. deterministic=True columns
+    (conversation_branch, branch_category) get their values from graph traversal
+    / post-generation categorization; the rest get SDA-generated values.
     """
     import uuid as uuid_module
 
@@ -957,24 +957,42 @@ def _add_scenario_columns(
         "persona": {
             "data_type": DataTypeChoices.PERSONA.value,
             "description": "Customer persona profile",
+            "deterministic": False,
         },
         "situation": {
             "data_type": DataTypeChoices.TEXT.value,
             "description": "Customer situation or scenario",
+            "deterministic": False,
         },
         "outcome": {
             "data_type": DataTypeChoices.TEXT.value,
             "description": "Conversation outcome",
+            "deterministic": False,
         },
         "conversation_branch": {
             "data_type": DataTypeChoices.TEXT.value,
             "description": "Branch name in workflow graph",
+            "deterministic": True,
         },
         "branch_category": {
             "data_type": DataTypeChoices.TEXT.value,
             "description": "Type of branch in the scenario graph",
+            "deterministic": True,
         },
     }
+    for col in custom_columns or []:
+        col_name = col.get("name")
+        if (
+            col_name
+            and col_name not in existing_column_names
+            and col_name not in scenario_columns_config
+        ):
+            scenario_columns_config[col_name] = {
+                "data_type": col.get("data_type", DataTypeChoices.TEXT.value),
+                "description": col.get("description", ""),
+                "deterministic": False,
+                "custom_property": col.get("property") or {},
+            }
 
     new_scenario_columns = {}
     new_columns = []
@@ -1074,6 +1092,8 @@ def _build_sda_payload(
     agent_definition,
     mode: str,
     scenario=None,
+    custom_columns: list | None = None,
+    custom_instruction: str | None = None,
 ) -> dict:
     """Build the payload for SyntheticDataAgent.generate_column_data."""
     try:
@@ -1085,6 +1105,8 @@ def _build_sda_payload(
             logger.warning("Could not import ee.agenthub.scenario_graph.persona_configurator", exc_info=True)
         return None
 
+    custom_columns = custom_columns or []
+    custom_instruction = (custom_instruction or "").strip()
     property_dict = PersonaConfigurator.get_property_dict(mode)
 
     from simulate.models.agent_version import (
@@ -1109,6 +1131,12 @@ def _build_sda_payload(
         "Include typos or short phrasing if appropriate for the situation. Write in third-person."
     )
 
+    objective = (
+        f"Generate realistic persona, situation, and outcome for {agent_name} scenarios "
+        f"that align with conversation branch context provided."
+    )
+    if custom_instruction:
+        objective = f"{objective} {custom_instruction}"
     requirements = {
         "Dataset Name": new_dataset.name,
         "Dataset Description": (
@@ -1117,10 +1145,7 @@ def _build_sda_payload(
             f"Supported Languages: {agent_languages}. "
             f"Call Type: {call_type_val}."
         ),
-        "Objective": (
-            f"Generate realistic persona, situation, and outcome for {agent_name} scenarios "
-            f"that align with conversation branch context provided."
-        ),
+        "Objective": objective,
     }
 
     constraints = [
@@ -1168,6 +1193,42 @@ def _build_sda_payload(
         "situation": {"type": "text"},
         "outcome": {"type": "text"},
     }
+
+    for column in custom_columns:
+        column_name = column.get("name")
+        if not column_name:
+            continue
+        column_type = column.get("data_type", "text")
+        column_description = column.get("description", "")
+        constraint_type = {
+            "json": "json",
+            "persona": "json",
+            "number": "number",
+            "integer": "number",
+            "float": "number",
+            "boolean": "boolean",
+            "string": "text",
+            "datetime": "datetime",
+            "array": "array",
+        }.get(column_type, "text")
+        default_property = (
+            {"min_length": 10, "max_length": 500, "required_elements": []}
+            if constraint_type == "text"
+            else {}
+        )
+        user_property = column.get("property") or {}
+        constraints.append(
+            {
+                "field": column_name,
+                "type": constraint_type,
+                "content": (
+                    f"{column_description}. Generate realistic and contextually relevant "
+                    f"data for {agent_name} scenarios aligned with the conversation branch context."
+                ),
+                "property": {**default_property, **user_property},
+            }
+        )
+        schema[column_name] = {"type": constraint_type}
 
     result = {
         "requirements": requirements,
@@ -1340,10 +1401,25 @@ def _create_dataset_scenario_sync(
                 Column.objects.bulk_create(new_columns)
 
             # ========================================
-            # PHASE 2: Add 5 scenario columns
+            # PHASE 2: Add scenario columns (5 base + user custom_columns)
             # ========================================
+            custom_columns_input = validated_data.get("custom_columns") or []
+            custom_instruction_input = None
+            if scenario.metadata:
+                _meta = scenario.metadata
+                if isinstance(_meta, str):
+                    try:
+                        _meta = json.loads(_meta)
+                    except Exception:
+                        _meta = {}
+                if isinstance(_meta, dict):
+                    custom_instruction_input = _meta.get("custom_instruction")
             new_scenario_columns, scenario_columns_config = _add_scenario_columns(
-                new_dataset, existing_column_names, agent_definition, mode
+                new_dataset,
+                existing_column_names,
+                agent_definition,
+                mode,
+                custom_columns=custom_columns_input,
             )
 
             # Update column_order with new column IDs
@@ -1522,7 +1598,12 @@ def _create_dataset_scenario_sync(
         # Build SDA payload for the 3 LLM-generated columns
         # (conversation_branch and branch_category are filled deterministically)
         sda_payload_data = _build_sda_payload(
-            new_dataset, agent_definition, mode, scenario=scenario
+            new_dataset,
+            agent_definition,
+            mode,
+            scenario=scenario,
+            custom_columns=custom_columns_input,
+            custom_instruction=custom_instruction_input,
         )
         base_payload = {
             "requirements": sda_payload_data["requirements"],
@@ -1551,17 +1632,17 @@ def _create_dataset_scenario_sync(
             status=StatusType.RUNNING.value
         )
 
+        llm_generated_names = [
+            name
+            for name, cfg in scenario_columns_config.items()
+            if not cfg.get("deterministic")
+        ]
+        branch_persist_names = llm_generated_names + ["conversation_branch"]
+
         # Create placeholder cells with RUNNING status for all scenario columns
-        # This makes cells visible to users immediately
         placeholder_cells = []
         for row_id in ordered_new_row_ids:
-            for col_name in [
-                "persona",
-                "situation",
-                "outcome",
-                "conversation_branch",
-                "branch_category",
-            ]:
+            for col_name in scenario_columns_config.keys():
                 if col_name in scenario_columns_by_name:
                     placeholder_cells.append(
                         Cell(
@@ -1586,12 +1667,7 @@ def _create_dataset_scenario_sync(
             Cell.objects.filter(
                 dataset=new_dataset,
                 row_id__in=ordered_new_row_ids,
-                column__name__in=[
-                    "persona",
-                    "situation",
-                    "outcome",
-                    "conversation_branch",
-                ],
+                column__name__in=branch_persist_names,
             ).select_related("column")
         )
         cell_lookup = {
@@ -1652,23 +1728,24 @@ def _create_dataset_scenario_sync(
                     for df_idx, row_idx in enumerate(row_indices):
                         row_id = ordered_new_row_ids[row_idx]
 
-                        # Update persona, situation, outcome cells
-                        for col_name in ["persona", "situation", "outcome"]:
+                        # SDA-generated columns (persona/situation/outcome + custom)
+                        for col_name in llm_generated_names:
                             if col_name not in scenario_columns_by_name:
                                 continue
                             cell_key = (str(row_id), col_name)
-                            if cell_key in cell_lookup:
-                                cell = cell_lookup[cell_key]
-                                value = ""
-                                if df_idx < len(branch_df):
-                                    value = branch_df.iloc[df_idx].get(col_name, "")
-                                    if col_name == "persona" and isinstance(
-                                        value, dict
-                                    ):
-                                        value = json.dumps(value)
-                                cell.value = value
-                                cell.status = CellStatus.PASS.value
-                                cells_to_update.append(cell)
+                            if cell_key not in cell_lookup:
+                                continue
+                            cell = cell_lookup[cell_key]
+                            value = ""
+                            if df_idx < len(branch_df):
+                                value = branch_df.iloc[df_idx].get(col_name, "")
+                                if isinstance(value, (dict, list)):
+                                    value = json.dumps(value)
+                                elif value is None:
+                                    value = ""
+                            cell.value = value
+                            cell.status = CellStatus.PASS.value
+                            cells_to_update.append(cell)
 
                         # Update conversation_branch cell (deterministic)
                         if "conversation_branch" in scenario_columns_by_name:

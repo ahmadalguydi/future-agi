@@ -1652,6 +1652,49 @@ class TestBuildSdaPayloadVersionPin:
 
         assert "Live Bot" in payload["requirements"]["Dataset Description"]
 
+    def test_custom_instruction_appended_to_objective(
+        self, db, new_dataset, agent_definition, organization, workspace
+    ):
+        from tfc.temporal.simulate.activities import _build_sda_payload
+
+        payload = _build_sda_payload(
+            new_dataset,
+            agent_definition,
+            "voice",
+            scenario=None,
+            custom_instruction="Focus on Spanish-speaking customers.",
+        )
+        assert (
+            "Focus on Spanish-speaking customers." in payload["requirements"]["Objective"]
+        )
+
+    def test_custom_columns_reach_constraints_and_schema(
+        self, db, new_dataset, agent_definition, organization, workspace
+    ):
+        from tfc.temporal.simulate.activities import _build_sda_payload
+
+        payload = _build_sda_payload(
+            new_dataset,
+            agent_definition,
+            "voice",
+            scenario=None,
+            custom_columns=[
+                {
+                    "name": "segment",
+                    "data_type": "text",
+                    "description": "customer segment",
+                    "property": {"min_length": 3, "max_length": 32},
+                }
+            ],
+        )
+        constraint = next(
+            c for c in payload["constraints"] if c["field"] == "segment"
+        )
+        assert constraint["type"] == "text"
+        assert constraint["property"]["min_length"] == 3
+        assert constraint["property"]["max_length"] == 32
+        assert payload["schema"]["segment"] == {"type": "text"}
+
 
 class TestScenarioDescriptionForwarding:
     """scenario.description must flow into the EnhancedScenariosAgent constructor."""
