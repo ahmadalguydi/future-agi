@@ -1107,7 +1107,7 @@ class EmbeddingManager:
             top_k (int, optional): Number of top similar items to retrieve. Defaults to 100.
 
         Returns:
-            str: The new doc_id created in the same table
+            list: Chunk ids (or metadata dicts when metadata_data=True) matching the query. Empty list on empty query, empty filtered set, or downstream error.
         """
         if filter_by is None:
             filter_by = {}
@@ -1184,7 +1184,7 @@ class EmbeddingManager:
                     chunk for chunk in filtered_chunks if chunk[3] >= adaptive_threshold
                 ]
             else:
-                return False
+                return []
             logger.info(f"Length of filtered chunks: {len(filtered_chunks)}")
 
             # Process filtered chunks
@@ -1202,7 +1202,7 @@ class EmbeddingManager:
         except Exception as e:
             traceback.print_exc()
             logger.exception(f"Error in get_relevant_chunks: {e}")
-            return str(uuid.uuid4())
+            return []
 
     def fix_base64_padding(self, base64_string):
         missing_padding = len(base64_string) % 4

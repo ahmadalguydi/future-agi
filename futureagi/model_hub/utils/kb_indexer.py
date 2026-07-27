@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import traceback
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,17 +36,27 @@ KB_INDEX_COL_NAME = "chunk_text"
 def build_kb_payload(
     kb_id: str | None, description: str | None
 ) -> dict[str, Any] | None:
-    """Shape a KB UUID + description into the SDA payload dict, or None."""
+    """Shape a KB UUID + description into the SDA payload dict, or None.
+
+    Empty / whitespace-only description short-circuits: KB retrieval needs a
+    non-empty query for the embedding model. Downstream code that iterates
+    the raw return of get_subset_kb_id assumes a list of UUIDs; guard against
+    non-iterable / stringly returns by rejecting anything not a list of
+    UUID-shaped items.
+    """
     if not kb_id:
         return None
+    query = (description or "").strip()
+    if not query:
+        return None
     try:
-        doc_ids = [
-            str(d)
-            for d in (KBIndexer().get_subset_kb_id(description or "", str(kb_id)) or [])
-        ]
+        raw = KBIndexer().get_subset_kb_id(query, str(kb_id))
     except Exception as exc:
         logger.warning("kb_payload_resolve_failed", kb_id=str(kb_id), error=str(exc))
         return None
+    if not isinstance(raw, list):
+        return None
+    doc_ids = [str(d) for d in raw if isinstance(d, (str, uuid.UUID)) and len(str(d)) >= 32]
     if not doc_ids:
         return None
     return {"table_name": KB_TABLE_NAME, "kb_id": str(kb_id), "doc_ids": doc_ids}

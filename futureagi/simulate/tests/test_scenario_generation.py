@@ -1079,7 +1079,10 @@ class TestKnowledgeBaseWiring:
 
         with patch(
             "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["doc-a", "doc-b"],
+            return_value=[
+                "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
+                "e6c1fd97-0444-4292-9165-023cc80dce6a",
+            ],
         ) as mock_get:
             payload = build_agent_kb_payload(agent_definition, "scenario desc")
 
@@ -1087,7 +1090,10 @@ class TestKnowledgeBaseWiring:
         assert payload == {
             "table_name": KB_TABLE_NAME,
             "kb_id": str(kb.id),
-            "doc_ids": ["doc-a", "doc-b"],
+            "doc_ids": [
+                "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
+                "e6c1fd97-0444-4292-9165-023cc80dce6a",
+            ],
         }
 
     def test_resolve_returns_none_on_indexer_exception(
@@ -1135,7 +1141,7 @@ class TestKnowledgeBaseWiring:
             "simulate.tasks.scenario_tasks.close_old_connections"
         ), patch(
             "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["doc-a"],
+            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             agent = mock_agent_cls.return_value
             agent.graph_generator.get_branches.return_value = []
@@ -1153,7 +1159,7 @@ class TestKnowledgeBaseWiring:
         assert kwargs["knowledge_base"] == {
             "table_name": KB_TABLE_NAME,
             "kb_id": str(kb.id),
-            "doc_ids": ["doc-a"],
+            "doc_ids": ["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         }
 
     def test_generate_scenario_rows_forwards_none_when_agent_has_no_kb(
@@ -1268,14 +1274,20 @@ class TestBuildKbPayload:
 
         with patch(
             "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["d-1", "d-2"],
+            return_value=[
+                "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
+                "e6c1fd97-0444-4292-9165-023cc80dce6a",
+            ],
         ):
             payload = build_kb_payload("kb-uuid", "desc")
 
         assert payload == {
             "table_name": KB_TABLE_NAME,
             "kb_id": "kb-uuid",
-            "doc_ids": ["d-1", "d-2"],
+            "doc_ids": [
+                "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
+                "e6c1fd97-0444-4292-9165-023cc80dce6a",
+            ],
         }
 
     def test_indexer_exception_returns_none(self):
@@ -1286,6 +1298,43 @@ class TestBuildKbPayload:
             side_effect=RuntimeError("boom"),
         ):
             assert build_kb_payload("kb-uuid", "desc") is None
+
+    def test_empty_description_short_circuits_before_embedding(self):
+        """Empty query would raise ValueError in the embedding model and fall into
+        get_relevant_chunks's exception path; skip the call entirely instead."""
+        from model_hub.utils.kb_indexer import build_kb_payload
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id"
+        ) as mock_get:
+            assert build_kb_payload("kb-uuid", "") is None
+            assert build_kb_payload("kb-uuid", "   ") is None
+            assert build_kb_payload("kb-uuid", None) is None
+            mock_get.assert_not_called()
+
+    def test_stringly_return_rejected(self):
+        """Regression: get_relevant_chunks used to return str(uuid.uuid4()) on error.
+        A raw string iterates as characters and produces single-char pseudo doc_ids
+        that crash ClickHouse. Reject non-list returns and return None."""
+        from model_hub.utils.kb_indexer import build_kb_payload
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value="cfd0e8a2-3064-489a-bf3f-43c430680f44",
+        ):
+            assert build_kb_payload("kb-uuid", "desc") is None
+
+    def test_non_uuid_items_filtered_out(self):
+        """Defensive: reject any items that are not UUID-shaped (32+ chars)."""
+        from model_hub.utils.kb_indexer import build_kb_payload
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["c", "f", "d", "cfd0e8a2-3064-489a-bf3f-43c430680f44"],
+        ):
+            payload = build_kb_payload("kb-uuid", "desc")
+            assert payload is not None
+            assert payload["doc_ids"] == ["cfd0e8a2-3064-489a-bf3f-43c430680f44"]
 
 
 class TestBuildAgentKbPayloadVersionPin:
@@ -1338,7 +1387,7 @@ class TestBuildAgentKbPayloadVersionPin:
 
         with patch(
             "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["snap-doc"],
+            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             payload = build_agent_kb_payload(
                 agent_definition, "desc", scenario=scenario
@@ -1361,7 +1410,7 @@ class TestBuildAgentKbPayloadVersionPin:
 
         with patch(
             "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["live-doc"],
+            return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
             payload = build_agent_kb_payload(
                 agent_definition, "desc", scenario=scenario
@@ -1390,7 +1439,7 @@ class TestBuildAgentKbPayloadVersionPin:
 
         with patch(
             "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["live-doc"],
+            return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
             payload = build_agent_kb_payload(
                 agent_definition, "desc", scenario=scenario
