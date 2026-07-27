@@ -35,20 +35,24 @@ KB_INDEX_COL_NAME = "chunk_text"
 def build_agent_kb_payload(agent_definition, description, scenario=None):
     """Resolve the agent's KB into the SDA payload shape, or None.
 
-    If scenario pins an AgentVersion, the snapshot's KB wins.
+    Version pin is authoritative: if the scenario metadata pins an
+    AgentVersion, only that snapshot's knowledge_base is used (a null
+    pin means no KB, not fall back to live).
     """
     kb_id = None
+    version_pinned = False
     if scenario is not None:
         metadata = getattr(scenario, "metadata", None) or {}
         if isinstance(metadata, dict):
             version_id = metadata.get("agent_definition_version_id")
             if version_id:
+                version_pinned = True
                 from simulate.models.agent_version import AgentVersion
 
                 v = AgentVersion.objects.filter(id=version_id).first()
                 if v and v.configuration_snapshot:
                     kb_id = v.configuration_snapshot.get("knowledge_base")
-    if not kb_id:
+    if not kb_id and not version_pinned:
         kb_id = getattr(agent_definition, "knowledge_base_id", None)
     if not kb_id:
         return None
