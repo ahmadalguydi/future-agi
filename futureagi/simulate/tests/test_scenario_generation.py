@@ -1190,3 +1190,240 @@ class TestKnowledgeBaseWiring:
 
         kwargs = mock_agent_cls.call_args.kwargs
         assert kwargs["knowledge_base"] is None
+
+
+class TestPinnedOrLiveHelper:
+    """Unit tests for pinned_or_live: snapshot value wins iff present and non-None."""
+
+    def _agent(self, **fields):
+        agent = MagicMock()
+        for k, v in fields.items():
+            setattr(agent, k, v)
+        return agent
+
+    def test_snapshot_value_wins_when_present(self):
+        from simulate.models.agent_version import pinned_or_live
+
+        assert (
+            pinned_or_live({"agent_name": "pinned"}, self._agent(agent_name="live"), "agent_name")
+            == "pinned"
+        )
+
+    def test_live_used_when_snapshot_is_none(self):
+        from simulate.models.agent_version import pinned_or_live
+
+        assert pinned_or_live(None, self._agent(agent_name="live"), "agent_name") == "live"
+
+    def test_live_used_when_snapshot_missing_field(self):
+        from simulate.models.agent_version import pinned_or_live
+
+        assert (
+            pinned_or_live({"other": 1}, self._agent(agent_name="live"), "agent_name")
+            == "live"
+        )
+
+    def test_live_used_when_snapshot_field_is_none(self):
+        from simulate.models.agent_version import pinned_or_live
+
+        assert (
+            pinned_or_live({"agent_name": None}, self._agent(agent_name="live"), "agent_name")
+            == "live"
+        )
+
+    def test_snapshot_false_wins_over_live_true(self):
+        """Regression: booleans must survive the truthy-only check."""
+        from simulate.models.agent_version import pinned_or_live
+
+        assert (
+            pinned_or_live({"inbound": False}, self._agent(inbound=True), "inbound") is False
+        )
+
+    def test_snapshot_empty_list_wins(self):
+        from simulate.models.agent_version import pinned_or_live
+
+        assert (
+            pinned_or_live({"languages": []}, self._agent(languages=["en"]), "languages")
+            == []
+        )
+
+
+class TestBuildAgentKbPayloadVersionPin:
+    """Version pin is authoritative: null snapshot KB means no KB, not fall-through."""
+
+    @pytest.fixture
+    def _kb(self, db, organization):
+        from model_hub.models.develop_dataset import KnowledgeBaseFile
+
+        return KnowledgeBaseFile.objects.create(name="live-kb", organization=organization)
+
+    def _agent_with_kb(self, agent_definition, kb):
+        agent_definition.knowledge_base = kb
+        agent_definition.save(update_fields=["knowledge_base"])
+        return agent_definition
+
+    def _scenario_with_version(self, db, agent_definition, organization, workspace, snapshot):
+        from simulate.models.agent_version import AgentVersion
+
+        version = AgentVersion.objects.create(
+            agent_definition=agent_definition,
+            organization=organization,
+            workspace=workspace,
+            version_number=1,
+            configuration_snapshot=snapshot or {},
+        )
+        scenario = Scenarios.objects.create(
+            name="s",
+            source="x",
+            scenario_type=Scenarios.ScenarioTypes.GRAPH,
+            organization=organization,
+            workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(version.id)},
+        )
+        return scenario, version
+
+    def test_snapshot_kb_wins_over_live(
+        self, db, agent_definition, organization, workspace, _kb
+    ):
+        from model_hub.models.develop_dataset import KnowledgeBaseFile
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        pinned_kb = KnowledgeBaseFile.objects.create(name="pinned-kb", organization=organization)
+        self._agent_with_kb(agent_definition, _kb)  # live points to _kb
+        scenario, _ = self._scenario_with_version(
+            db, agent_definition, organization, workspace,
+            snapshot={"knowledge_base": str(pinned_kb.id)},
+        )
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["snap-doc"],
+        ):
+            payload = build_agent_kb_payload(
+                agent_definition, "desc", scenario=scenario
+            )
+
+        assert payload["kb_id"] == str(pinned_kb.id)
+        assert payload["kb_id"] != str(_kb.id)
+
+    def test_snapshot_null_kb_returns_none_not_live_fallback(
+        self, db, agent_definition, organization, workspace, _kb
+    ):
+        """v3-with-no-KB case: pinned version means live is silently ignored."""
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb(agent_definition, _kb)  # live has a KB
+        scenario, _ = self._scenario_with_version(
+            db, agent_definition, organization, workspace,
+            snapshot={"knowledge_base": None},
+        )
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["live-doc"],
+        ):
+            payload = build_agent_kb_payload(
+                agent_definition, "desc", scenario=scenario
+            )
+
+        assert payload is None
+
+    def test_missing_version_returns_none(
+        self, db, agent_definition, organization, workspace, _kb
+    ):
+        """Pin points to a nonexistent version: pin authority means no live fallback."""
+        import uuid as _uuid
+
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb(agent_definition, _kb)
+        scenario = Scenarios.objects.create(
+            name="s",
+            source="x",
+            scenario_type=Scenarios.ScenarioTypes.GRAPH,
+            organization=organization,
+            workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(_uuid.uuid4())},
+        )
+
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["live-doc"],
+        ):
+            payload = build_agent_kb_payload(
+                agent_definition, "desc", scenario=scenario
+            )
+
+        assert payload is None
+
+
+class TestColumnDefinitionSerializerProperty:
+    """Regression: custom_columns[*].property must reach the request payload."""
+
+    def test_accepts_property_dict(self):
+        from simulate.serializers.requests.scenarios import ColumnDefinitionSerializer
+
+        ser = ColumnDefinitionSerializer(
+            data={
+                "name": "segment",
+                "data_type": "text",
+                "description": "customer segment tag",
+                "property": {"min_length": 3, "max_length": 32},
+            }
+        )
+        assert ser.is_valid(), ser.errors
+        assert ser.validated_data["property"] == {"min_length": 3, "max_length": 32}
+
+    def test_property_is_optional(self):
+        from simulate.serializers.requests.scenarios import ColumnDefinitionSerializer
+
+        ser = ColumnDefinitionSerializer(
+            data={
+                "name": "segment",
+                "data_type": "text",
+                "description": "customer segment tag",
+            }
+        )
+        assert ser.is_valid(), ser.errors
+
+
+class TestScenarioDescriptionForwarding:
+    """scenario.description must flow into the EnhancedScenariosAgent constructor."""
+
+    def test_generate_scenario_rows_forwards_scenario_description(
+        self, db, scenario_dataset, agent_definition, organization, workspace
+    ):
+        from simulate.tasks.scenario_tasks import generate_scenario_rows
+
+        columns = list(Column.objects.filter(dataset=scenario_dataset))
+        row_ids = TestGenerateScenarioRowsPrefetch._seed_rows(scenario_dataset, num_rows=1)
+        TestGenerateScenarioRowsPrefetch._seed_cells(scenario_dataset, columns, row_ids)
+        scenario = TestGenerateScenarioRowsPrefetch._make_scenario_and_graph(
+            scenario_dataset, agent_definition, organization, workspace
+        )
+        scenario.description = "pinned scenario description"
+        scenario.save(update_fields=["description"])
+        cases = TestGenerateScenarioRowsPrefetch._build_cases(1, columns)
+
+        with patch(
+            "simulate.tasks.scenario_tasks.EnhancedScenariosAgent"
+        ) as mock_agent_cls, patch(
+            "simulate.tasks.scenario_tasks.close_old_connections"
+        ):
+            mock = mock_agent_cls.return_value
+            mock.graph_generator.get_branches.return_value = []
+            mock._generate_cases_for_branches.return_value = cases
+
+            generate_scenario_rows(
+                dataset_id=scenario_dataset.id,
+                scenario_id=scenario.id,
+                num_rows=1,
+                description="call-time desc",
+                new_rows_id=row_ids,
+            )
+
+        assert (
+            mock_agent_cls.call_args.kwargs["scenario_description"]
+            == "pinned scenario description"
+        )
