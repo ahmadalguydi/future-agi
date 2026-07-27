@@ -31,32 +31,16 @@ from tfc.utils.storage_client import get_storage_client
 KB_TABLE_NAME = "syn"
 KB_INDEX_COL_TYPE = "text"
 KB_INDEX_COL_NAME = "chunk_text"
-KB_DOC_ID_PAYLOAD_CAP = 500
 
 
 def build_kb_payload(
-    kb_id: str | None, description: str | None = None
+    kb_id: str | None, description: str | None
 ) -> dict[str, Any] | None:
-    """Shape a KB UUID into the SDA payload dict, or None.
-
-    Scenario-generation KB seeding is agent-scoped, not scenario-scoped: the KB
-    is attached to the AgentDefinition. Per-case seed diversity comes from the
-    downstream synthetic-data agent's random-sampling loop; this function's job
-    is to hand it a bounded population of chunk ids to sample from.
-
-    The population is capped at KB_DOC_ID_PAYLOAD_CAP chunks to keep the Temporal
-    activity payload safely under the 4 MiB cap and to bound downstream LLM cost:
-      * small KBs (<= cap): every chunk is in the payload,
-      * large KBs (> cap): a random slice of `cap` chunks (fresh per call).
-
-    The `description` parameter is retained for signature stability; it is not
-    used for retrieval. Empty or missing description does NOT gate the KB.
-    """
-    del description  # unused; see docstring
+    """Semantic-subset KB payload dict, or None on empty query / no chunks / error."""
     if not kb_id:
         return None
     try:
-        raw = KBIndexer().get_kb_doc_id_sample(str(kb_id), KB_DOC_ID_PAYLOAD_CAP)
+        raw = KBIndexer().get_subset_kb_id(description or "", str(kb_id))
     except Exception as exc:
         logger.warning("kb_payload_resolve_failed", kb_id=str(kb_id), error=str(exc))
         return None
@@ -73,7 +57,7 @@ def build_agent_kb_payload(
     description: str | None,
     scenario: Any = None,
 ) -> dict[str, Any] | None:
-    """Resolve an agent's KB into the SDA payload shape. Accepts an AgentDefinition instance or its UUID. Version pin is authoritative."""
+    """Resolve KB id + retrieval query for the agent. Version pin is authoritative."""
     if agent_or_id is None:
         return None
     from simulate.models.agent_version import (
@@ -83,6 +67,7 @@ def build_agent_kb_payload(
 
     snapshot = resolve_configuration_snapshot(scenario)
     kb_id = snapshot.get("knowledge_base") if snapshot else None
+    prompt_fallback = snapshot.get("description") if snapshot else None
     if not kb_id and not has_version_pin(scenario):
         agent = agent_or_id
         if not hasattr(agent, "knowledge_base_id"):
@@ -92,7 +77,9 @@ def build_agent_kb_payload(
             if agent is None:
                 return None
         kb_id = getattr(agent, "knowledge_base_id", None)
-    return build_kb_payload(kb_id, description)
+        if not prompt_fallback:
+            prompt_fallback = getattr(agent, "description", None)
+    return build_kb_payload(kb_id, description or prompt_fallback or "")
 
 
 @dataclass
@@ -332,33 +319,6 @@ class KBIndexer:
 
         # Update the chunks list with all processed chunks
         self.chunks.extend(all_chunks)
-
-    def get_kb_doc_id_sample(self, kb_id: str, max_count: int = 500) -> list[str]:
-        """Return up to `max_count` random chunk ids from the KB.
-
-        Bounded by design: never loads more than `max_count` uuids regardless
-        of KB size. This keeps the Temporal activity payload well under the
-        4 MiB cap for arbitrarily large KBs (500 uuids ~= 18 KB, 5000 ~= 180 KB)
-        AND keeps `KBSeedInstructionAgent.fetch_random_seeds` per-case LLM cost
-        bounded via its `max(20, count * 0.10)` sampler (500 -> 50 seeds/case).
-
-        Small KBs (<= max_count chunks): `ORDER BY rand() LIMIT max_count`
-        returns every chunk (rand ordering is a no-op for the payload contract).
-
-        Large KBs (> max_count chunks): returns a random subset of size
-        `max_count`. Different scenarios seed from different random slices;
-        combined with the downstream per-case random sampler this preserves
-        diversity across generations without inflating cost.
-        """
-        from agentic_eval.core.database.ch_vector import ClickHouseVectorDB
-
-        db = ClickHouseVectorDB()
-        rows = db.client.execute(
-            f"SELECT id FROM {KB_TABLE_NAME} "
-            f"WHERE eval_id = '{kb_id}' AND deleted = 0 "
-            f"ORDER BY rand() LIMIT {int(max_count)}"
-        )
-        return [str(r[0]) for r in (rows or [])]
 
     def get_subset_kb_id(self, query: str, kb_id: str) -> str:
         """Get a new kb_id for the relevant chunks

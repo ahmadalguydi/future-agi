@@ -1060,7 +1060,7 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample", return_value=[]
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id", return_value=[]
         ):
             payload = build_agent_kb_payload(agent_definition, "anything")
 
@@ -1078,7 +1078,7 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=[
                 "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
                 "e6c1fd97-0444-4292-9165-023cc80dce6a",
@@ -1107,7 +1107,7 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             side_effect=RuntimeError("boom"),
         ):
             payload = build_agent_kb_payload(agent_definition, "anything")
@@ -1140,7 +1140,7 @@ class TestKnowledgeBaseWiring:
         ) as mock_agent_cls, patch(
             "simulate.tasks.scenario_tasks.close_old_connections"
         ), patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             agent = mock_agent_cls.return_value
@@ -1254,13 +1254,6 @@ class TestPinnedOrLiveHelper:
 
 
 class TestBuildKbPayload:
-    """Extracted primitive used by both scenario generation and eval synthetic data.
-
-    Under the current design build_kb_payload does not run a per-scenario semantic
-    filter; it enumerates every chunk id in the KB and hands them to the SDA. Per-case
-    seed diversity comes from KBSeedInstructionAgent's randomized LIMIT. See design
-    note in build_kb_payload docstring.
-    """
 
     def test_none_kb_id_returns_none(self):
         from model_hub.utils.kb_indexer import build_kb_payload
@@ -1271,7 +1264,7 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample", return_value=[]
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id", return_value=[]
         ):
             assert build_kb_payload("kb-uuid", "desc") is None
 
@@ -1279,7 +1272,7 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import KB_TABLE_NAME, build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=[
                 "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
                 "e6c1fd97-0444-4292-9165-023cc80dce6a",
@@ -1300,80 +1293,47 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             side_effect=RuntimeError("boom"),
         ):
             assert build_kb_payload("kb-uuid", "desc") is None
 
-    def test_empty_description_still_returns_full_kb(self):
-        """Empty or missing description must not gate KB retrieval. The KB is
-        attached to the AgentDefinition; scenario.description is optional and
-        cannot be a hard dependency for KB seeding to work."""
-        from model_hub.utils.kb_indexer import KB_TABLE_NAME, build_kb_payload
-
-        chunks = [
-            "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
-            "e6c1fd97-0444-4292-9165-023cc80dce6a",
-        ]
-        with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
-            return_value=chunks,
-        ):
-            for desc in ("", "   ", None):
-                p = build_kb_payload("kb-uuid", desc)
-                assert p is not None
-                assert p["doc_ids"] == chunks
-                assert p["kb_id"] == "kb-uuid"
-                assert p["table_name"] == KB_TABLE_NAME
-
     def test_non_uuid_items_filtered_out(self):
-        """Defensive: reject any items that are not UUID-shaped (32+ chars)."""
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=["c", "f", "d", "cfd0e8a2-3064-489a-bf3f-43c430680f44"],
         ):
             payload = build_kb_payload("kb-uuid", "desc")
             assert payload is not None
             assert payload["doc_ids"] == ["cfd0e8a2-3064-489a-bf3f-43c430680f44"]
 
-    def test_description_argument_is_ignored_for_retrieval(self):
-        """Regression: KB retrieval must not depend on scenario.description. Two
-        different descriptions must produce the same doc_ids for the same KB."""
+    def test_description_is_forwarded_to_semantic_subset(self):
         from model_hub.utils.kb_indexer import build_kb_payload
 
-        chunks = [
-            "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
-            "e6c1fd97-0444-4292-9165-023cc80dce6a",
-        ]
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
-            return_value=chunks,
-        ):
-            p1 = build_kb_payload("kb-uuid", "Enterprise onboarding")
-            p2 = build_kb_payload("kb-uuid", "Refund from angry customer")
-        assert p1 == p2
-        assert p1["doc_ids"] == chunks
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["cfd0e8a2-3064-489a-bf3f-43c430680f44"],
+        ) as mock_subset:
+            build_kb_payload("kb-uuid", "Enterprise onboarding")
+        mock_subset.assert_called_once()
+        args, _ = mock_subset.call_args
+        assert args[0] == "Enterprise onboarding"
+        assert args[1] == "kb-uuid"
 
-    def test_payload_size_is_capped_for_large_kbs(self):
-        """Prod-safety: KB_DOC_ID_PAYLOAD_CAP bounds the payload so a huge KB
-        cannot blow past the Temporal 4 MiB activity payload cap."""
-        from model_hub.utils.kb_indexer import (
-            KB_DOC_ID_PAYLOAD_CAP,
-            build_kb_payload,
-        )
+    def test_empty_description_calls_subset_with_empty_string(self):
+        from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample"
-        ) as mock_sample:
-            build_kb_payload("kb-uuid", "any desc")
-        mock_sample.assert_called_once()
-        args, _ = mock_sample.call_args
-        assert args[0] == "kb-uuid"
-        assert args[1] == KB_DOC_ID_PAYLOAD_CAP
-        # Cap must be defensively small (18 KB at 500 uuids, << 4 MiB Temporal cap)
-        assert KB_DOC_ID_PAYLOAD_CAP <= 5000
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=[],
+        ) as mock_subset:
+            for desc in ("", None):
+                assert build_kb_payload("kb-uuid", desc) is None
+        assert mock_subset.call_count == 2
+        for call in mock_subset.call_args_list:
+            assert call.args[0] == ""
 
 
 class TestBuildAgentKbPayloadVersionPin:
@@ -1425,7 +1385,7 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             payload = build_agent_kb_payload(
@@ -1448,7 +1408,7 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
             payload = build_agent_kb_payload(
@@ -1477,7 +1437,7 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
             return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
             payload = build_agent_kb_payload(
