@@ -1833,3 +1833,98 @@ class TestScenarioDescriptionForwarding:
             )
 
         assert mock_agent_cls.call_args.kwargs["configuration_snapshot"] == snap
+
+
+class TestApplyCustomColumnConstraints:
+    def test_none_or_empty_is_noop(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        for cols in (None, []):
+            constraints, schema = [], {}
+            apply_custom_column_constraints(constraints, schema, cols, "Bot")
+            assert constraints == [] and schema == {}
+
+    def test_column_without_name_is_skipped(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        constraints, schema = [], {}
+        apply_custom_column_constraints(
+            constraints, schema, [{"data_type": "text"}], "Bot"
+        )
+        assert constraints == [] and schema == {}
+
+    def test_column_type_mapping(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        cases = [
+            ("json", "json"),
+            ("persona", "json"),
+            ("number", "number"),
+            ("integer", "number"),
+            ("float", "number"),
+            ("boolean", "boolean"),
+            ("string", "text"),
+            ("datetime", "datetime"),
+            ("array", "array"),
+            ("text", "text"),
+            ("unknown_type", "text"),
+        ]
+        for src, expected in cases:
+            constraints, schema = [], {}
+            apply_custom_column_constraints(
+                constraints, schema, [{"name": "c", "data_type": src}], "Bot"
+            )
+            assert schema["c"]["type"] == expected, (src, expected)
+            assert constraints[0]["type"] == expected
+
+    def test_default_text_property_and_user_override(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        constraints, schema = [], {}
+        apply_custom_column_constraints(
+            constraints, schema,
+            [{"name": "seg", "data_type": "text", "property": {"max_length": 32}}],
+            "Bot",
+        )
+        prop = constraints[0]["property"]
+        assert prop["min_length"] == 10
+        assert prop["max_length"] == 32
+        assert prop["required_elements"] == []
+
+    def test_non_text_type_gets_only_user_property(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        constraints, schema = [], {}
+        apply_custom_column_constraints(
+            constraints, schema,
+            [{"name": "flag", "data_type": "boolean", "property": {"nullable": True}}],
+            "Bot",
+        )
+        assert constraints[0]["property"] == {"nullable": True}
+
+    def test_content_string_shape(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        constraints, schema = [], {}
+        apply_custom_column_constraints(
+            constraints, schema,
+            [{"name": "tone", "data_type": "text", "description": "customer tone"}],
+            "Alice", branch_context_footer=" branch=welcome",
+        )
+        expected = (
+            "customer tone. Generate realistic and contextually relevant data "
+            "for Alice scenarios that can be tailored using the conversation "
+            "branch information below. branch=welcome"
+        )
+        assert constraints[0]["content"] == expected
+
+    def test_schema_entry_added(self):
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        constraints, schema = [], {"persona": {"type": "json"}}
+        apply_custom_column_constraints(
+            constraints, schema,
+            [{"name": "urgency", "data_type": "text"}], "Bot",
+        )
+        assert schema["urgency"] == {"type": "text"}
+        assert schema["persona"] == {"type": "json"}

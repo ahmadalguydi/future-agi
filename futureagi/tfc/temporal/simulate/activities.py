@@ -1197,41 +1197,9 @@ def _build_sda_payload(
         "outcome": {"type": "text"},
     }
 
-    for column in custom_columns:
-        column_name = column.get("name")
-        if not column_name:
-            continue
-        column_type = column.get("data_type", "text")
-        column_description = column.get("description", "")
-        constraint_type = {
-            "json": "json",
-            "persona": "json",
-            "number": "number",
-            "integer": "number",
-            "float": "number",
-            "boolean": "boolean",
-            "string": "text",
-            "datetime": "datetime",
-            "array": "array",
-        }.get(column_type, "text")
-        default_property = (
-            {"min_length": 10, "max_length": 500, "required_elements": []}
-            if constraint_type == "text"
-            else {}
-        )
-        user_property = column.get("property") or {}
-        constraints.append(
-            {
-                "field": column_name,
-                "type": constraint_type,
-                "content": (
-                    f"{column_description}. Generate realistic and contextually relevant "
-                    f"data for {agent_name} scenarios aligned with the conversation branch context."
-                ),
-                "property": {**default_property, **user_property},
-            }
-        )
-        schema[column_name] = {"type": constraint_type}
+    from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+    apply_custom_column_constraints(constraints, schema, custom_columns, agent_name)
 
     result = {
         "requirements": requirements,
