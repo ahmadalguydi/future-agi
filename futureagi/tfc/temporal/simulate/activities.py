@@ -1088,9 +1088,6 @@ def _build_sda_payload(
 
     property_dict = PersonaConfigurator.get_property_dict(mode)
 
-    # Honor version-pin: prefer snapshot values over live agent fields when
-    # the scenario pins an AgentVersion. Matches the pattern used in the
-    # graph/script flows via EnhancedScenariosAgent.
     from simulate.models.agent_version import (
         pinned_or_live,
         resolve_configuration_snapshot,

@@ -1477,6 +1477,38 @@ class TestResolveConfigurationSnapshot:
         assert resolve_configuration_snapshot(scenario) is None
 
 
+class TestHasVersionPin:
+    """Distinguishes 'pin intended but version missing' from 'no pin at all',
+    used by build_agent_kb_payload's authoritative-pin fallback rule."""
+
+    def test_no_scenario(self):
+        from simulate.models.agent_version import has_version_pin
+
+        assert has_version_pin(None) is False
+
+    def test_no_pin_in_metadata(self, db, agent_definition, organization, workspace):
+        from simulate.models.agent_version import has_version_pin
+
+        scenario = Scenarios.objects.create(
+            name="s", source="x", scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition, metadata={},
+        )
+        assert has_version_pin(scenario) is False
+
+    def test_pin_present_even_when_version_deleted(self, db, agent_definition, organization, workspace):
+        import uuid as _uuid
+        from simulate.models.agent_version import has_version_pin
+
+        scenario = Scenarios.objects.create(
+            name="s", source="x", scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(_uuid.uuid4())},
+        )
+        assert has_version_pin(scenario) is True
+
+
 class TestGenerateScenarioColumnsVersionPin:
     """Add-columns flow: generate_scenario_columns must honor the version pin
     when building the SDA prompt for new column values."""

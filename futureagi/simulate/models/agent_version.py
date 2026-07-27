@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from django.conf import settings
 from django.db import models
@@ -8,10 +9,12 @@ from simulate.pydantic_schemas.agent_version import AgentConfigurationSnapshot
 from tfc.utils.base_model import BaseModel
 
 
-def pinned_or_live(configuration_snapshot, agent_definition, field_name):
-    """Return the pinned snapshot value for field_name if the snapshot has it,
-    else the live value from agent_definition. Version pin is authoritative:
-    a snapshot with an explicit non-None entry wins over live."""
+def pinned_or_live(
+    configuration_snapshot: dict[str, Any] | None,
+    agent_definition: Any,
+    field_name: str,
+) -> Any:
+    """Snapshot's value for field_name wins over live agent when present and non-None."""
     if configuration_snapshot:
         val = configuration_snapshot.get(field_name)
         if val is not None:
@@ -19,19 +22,24 @@ def pinned_or_live(configuration_snapshot, agent_definition, field_name):
     return getattr(agent_definition, field_name, None)
 
 
-def resolve_configuration_snapshot(scenario):
-    """Load the AgentVersion.configuration_snapshot pinned by a scenario, or None.
-
-    Reads scenario.metadata["agent_definition_version_id"] and returns the
-    version's snapshot dict. Callers pair this with pinned_or_live to honor
-    the pin at prompt-construction sites.
-    """
+def _pinned_version_id(scenario: Any) -> str | None:
     if scenario is None:
         return None
     metadata = getattr(scenario, "metadata", None) or {}
     if not isinstance(metadata, dict):
         return None
     version_id = metadata.get("agent_definition_version_id")
+    return str(version_id) if version_id else None
+
+
+def has_version_pin(scenario: Any) -> bool:
+    """True iff scenario metadata pins an AgentVersion; used for authoritative-pin fallback."""
+    return _pinned_version_id(scenario) is not None
+
+
+def resolve_configuration_snapshot(scenario: Any) -> dict[str, Any] | None:
+    """Return the pinned AgentVersion.configuration_snapshot for a scenario, or None."""
+    version_id = _pinned_version_id(scenario)
     if not version_id:
         return None
     v = AgentVersion.objects.filter(id=version_id).first()

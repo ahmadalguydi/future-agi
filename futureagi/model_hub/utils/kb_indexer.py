@@ -32,12 +32,10 @@ KB_INDEX_COL_TYPE = "text"
 KB_INDEX_COL_NAME = "chunk_text"
 
 
-def build_kb_payload(kb_id, description):
-    """Resolve a KB UUID + description into the SDA payload shape, or None.
-
-    Shared primitive: both agent-driven (scenario generation) and dataset-
-    driven (eval synthetic data) callers land on the same shape.
-    """
+def build_kb_payload(
+    kb_id: str | None, description: str | None
+) -> dict[str, Any] | None:
+    """Shape a KB UUID + description into the SDA payload dict, or None."""
     if not kb_id:
         return None
     try:
@@ -53,30 +51,22 @@ def build_kb_payload(kb_id, description):
     return {"table_name": KB_TABLE_NAME, "kb_id": str(kb_id), "doc_ids": doc_ids}
 
 
-def build_agent_kb_payload(agent_or_id, description, scenario=None):
-    """Resolve an agent's KB into the SDA payload shape, or None.
-
-    Accepts either an AgentDefinition instance or its UUID. Version pin
-    is authoritative: if scenario metadata pins an AgentVersion, only
-    the snapshot's knowledge_base is used (null pin means no KB, not
-    fall back to live).
-    """
+def build_agent_kb_payload(
+    agent_or_id: Any,
+    description: str | None,
+    scenario: Any = None,
+) -> dict[str, Any] | None:
+    """Resolve an agent's KB into the SDA payload shape. Version pin is authoritative."""
     if agent_or_id is None:
         return None
-    kb_id = None
-    version_pinned = False
-    if scenario is not None:
-        metadata = getattr(scenario, "metadata", None) or {}
-        if isinstance(metadata, dict):
-            version_id = metadata.get("agent_definition_version_id")
-            if version_id:
-                version_pinned = True
-                from simulate.models.agent_version import AgentVersion
+    from simulate.models.agent_version import (
+        has_version_pin,
+        resolve_configuration_snapshot,
+    )
 
-                v = AgentVersion.objects.filter(id=version_id).first()
-                if v and v.configuration_snapshot:
-                    kb_id = v.configuration_snapshot.get("knowledge_base")
-    if not kb_id and not version_pinned:
+    snapshot = resolve_configuration_snapshot(scenario)
+    kb_id = snapshot.get("knowledge_base") if snapshot else None
+    if not kb_id and not has_version_pin(scenario):
         agent = agent_or_id
         if not hasattr(agent, "knowledge_base_id"):
             from simulate.models import AgentDefinition
