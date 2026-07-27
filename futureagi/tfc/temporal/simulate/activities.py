@@ -2120,7 +2120,13 @@ def _create_script_scenario_sync(
 
         no_of_rows = validated_data.get("no_of_rows", 20)
         script_url = validated_data.get("script_url")
-        agent_definition_id = validated_data.get("agent_definition_id")
+        source_type = validated_data.get("source_type", "agent_definition")
+        agent_definition = _resolve_scenario_agent(scenario, source_type)
+        if not agent_definition:
+            raise ValueError(
+                "Either agent_definition or prompt_template is required on "
+                "the scenario for script scenario creation"
+            )
         persona_ids = _effective_persona_ids(validated_data)
         custom_columns = validated_data.get("custom_columns", [])
 
@@ -2146,29 +2152,26 @@ def _create_script_scenario_sync(
         scenario.metadata = current_metadata
         scenario.save()
 
-        # Handle graph generation or use provided graph data
+        # Handle graph generation. Prompt-based scripts share the adapter path.
         generated_graph_data = None
-        if agent_definition_id:
-            # Generate graph using ConversationGraphGenerator
-            try:
-                graph_generator = ConversationGraphGenerator(
-                    agent_definition_id=str(agent_definition_id),
-                    scenario=scenario,
-                    script_url=script_url,
-                )
-                generated_graph_data = graph_generator.generate_graph(save_to_db=True)
-
-            except Exception as e:
-                scenario.status = StatusType.FAILED.value
-                scenario.save()
-                raise Exception(f"Failed to generate graph: {str(e)}")
+        try:
+            graph_generator = ConversationGraphGenerator(
+                scenario=scenario,
+                agent_definition=agent_definition,
+                script_url=script_url,
+            )
+            generated_graph_data = graph_generator.generate_graph(save_to_db=True)
+        except Exception as e:
+            scenario.status = StatusType.FAILED.value
+            scenario.save()
+            raise Exception(f"Failed to generate graph: {str(e)}")
 
         enhanced_agent = EnhancedScenariosAgent(
-            str(agent_definition_id),
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
+            agent_definition=agent_definition,
             knowledge_base=build_agent_kb_payload(
-                agent_definition_id, scenario.description, scenario=scenario
+                agent_definition, scenario.description, scenario=scenario
             ),
             scenario_description=scenario.description,
         )
@@ -2542,64 +2545,11 @@ def _create_graph_scenario_sync(
         # Convert persona IDs to property_list
         property_list = convert_personas_to_property_list(persona_ids)
 
-        # Build agent_definition object — real DB lookup or adapter for prompt sources
-        if source_type == "prompt" and scenario.prompt_template:
-            # Extract full prompt content from prompt_version config for graph generation
-            prompt_content = ""
-            prompt_version = scenario.prompt_version
-            if not prompt_version:
-                # Fallback to default version from template
-                prompt_version = scenario.prompt_template.all_executions.filter(
-                    is_default=True, deleted=False
-                ).first()
-
-            if prompt_version and prompt_version.prompt_config_snapshot:
-                config_snapshot = prompt_version.prompt_config_snapshot
-                # Handle both list and dict formats
-                config = (
-                    config_snapshot[0]
-                    if isinstance(config_snapshot, list)
-                    else config_snapshot
-                )
-                if isinstance(config, dict):
-                    messages = config.get("messages", [])
-                    # Format all messages into a readable prompt description
-                    formatted_messages = []
-                    for msg in messages:
-                        role = msg.get("role", "unknown")
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            # Handle multimodal content - extract text parts
-                            text_parts = [
-                                p.get("text", "")
-                                for p in content
-                                if isinstance(p, dict) and p.get("type") == "text"
-                            ]
-                            content = "\n".join(text_parts)
-                        if content:
-                            formatted_messages.append(f"[{role}]: {content}")
-                    prompt_content = "\n\n".join(formatted_messages)
-
-            # Use full prompt content if available, otherwise fall back to description
-            agent_description = (
-                prompt_content or scenario.prompt_template.description or ""
-            )
-
-            agent_definition = types.SimpleNamespace(
-                id=scenario.prompt_template.id,
-                agent_name=scenario.prompt_template.name,
-                description=agent_description,
-                agent_type="text",
-                languages=["en"],
-                language="en",
-                inbound=True,
-                contact_number=None,
-                organization=scenario.organization,
-                workspace=scenario.workspace,
-            )
-        else:
-            agent_definition = AgentDefinition.no_workspace_objects.get(
-                id=agent_definition_id
+        agent_definition = _resolve_scenario_agent(scenario, source_type)
+        if not agent_definition:
+            raise ValueError(
+                "Either agent_definition or prompt_template is required on "
+                "the scenario for graph scenario creation"
             )
 
         # Update scenario source
@@ -2987,66 +2937,20 @@ def _setup_graph_scenario_sync(
 
         property_list = convert_personas_to_property_list(persona_ids)
 
-        # Build agent_definition object
-        if source_type == "prompt" and scenario.prompt_template:
-            prompt_content = ""
-            prompt_version = scenario.prompt_version
-            if not prompt_version:
-                prompt_version = scenario.prompt_template.all_executions.filter(
-                    is_default=True, deleted=False
-                ).first()
-
-            if prompt_version and prompt_version.prompt_config_snapshot:
-                config_snapshot = prompt_version.prompt_config_snapshot
-                config = (
-                    config_snapshot[0]
-                    if isinstance(config_snapshot, list)
-                    else config_snapshot
-                )
-                if isinstance(config, dict):
-                    messages = config.get("messages", [])
-                    formatted_messages = []
-                    for msg in messages:
-                        role = msg.get("role", "unknown")
-                        content = msg.get("content", "")
-                        if isinstance(content, list):
-                            text_parts = [
-                                p.get("text", "")
-                                for p in content
-                                if isinstance(p, dict) and p.get("type") == "text"
-                            ]
-                            content = "\n".join(text_parts)
-                        if content:
-                            formatted_messages.append(f"[{role}]: {content}")
-                    prompt_content = "\n\n".join(formatted_messages)
-
-            agent_description = (
-                prompt_content or scenario.prompt_template.description or ""
-            )
-
-            agent_definition = types.SimpleNamespace(
-                id=scenario.prompt_template.id,
-                agent_name=scenario.prompt_template.name,
-                description=agent_description,
-                agent_type="text",
-                languages=["en"],
-                language="en",
-                inbound=True,
-                contact_number=None,
-                organization=scenario.organization,
-                workspace=scenario.workspace,
-            )
-        else:
-            try:
-                agent_definition = AgentDefinition.no_workspace_objects.get(
-                    id=agent_definition_id
-                )
-            except AgentDefinition.DoesNotExist:
-                return {
-                    "scenario_id": scenario_id,
-                    "status": "FAILED",
-                    "error": f"Agent definition '{agent_definition_id}' not found. Please verify the agent_definition_id.",
-                }
+        try:
+            agent_definition = _resolve_scenario_agent(scenario, source_type)
+        except AgentDefinition.DoesNotExist:
+            return {
+                "scenario_id": scenario_id,
+                "status": "FAILED",
+                "error": f"Agent definition '{agent_definition_id}' not found. Please verify the agent_definition_id.",
+            }
+        if not agent_definition:
+            return {
+                "scenario_id": scenario_id,
+                "status": "FAILED",
+                "error": "Either agent_definition or prompt_template is required on the scenario.",
+            }
 
         # Update scenario source and mark as processing
         scenario.source = "Graph-based scenario"
