@@ -1429,6 +1429,88 @@ class TestColumnDefinitionSerializerProperty:
         assert ser.is_valid(), ser.errors
 
 
+class TestBuildSdaPayloadVersionPin:
+    """Dataset scenario flow: `_build_sda_payload` must honor the version pin
+    when constructing the SDA prompt."""
+
+    @pytest.fixture
+    def new_dataset(self, db, organization, workspace, user):
+        return Dataset.no_workspace_objects.create(
+            name="target",
+            organization=organization,
+            workspace=workspace,
+            user=user,
+            source=DatasetSourceChoices.SCENARIO.value,
+        )
+
+    def _make_scenario_with_pin(
+        self, db, agent_definition, organization, workspace, snapshot
+    ):
+        from simulate.models.agent_version import AgentVersion
+
+        v = AgentVersion.objects.create(
+            agent_definition=agent_definition,
+            organization=organization,
+            workspace=workspace,
+            version_number=1,
+            configuration_snapshot=snapshot,
+        )
+        return Scenarios.objects.create(
+            name="s",
+            source="x",
+            scenario_type=Scenarios.ScenarioTypes.DATASET,
+            organization=organization,
+            workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(v.id)},
+        )
+
+    def test_snapshot_agent_name_wins_in_dataset_payload(
+        self, db, new_dataset, agent_definition, organization, workspace
+    ):
+        from tfc.temporal.simulate.activities import _build_sda_payload
+
+        agent_definition.agent_name = "Live Bot"
+        agent_definition.save(update_fields=["agent_name"])
+        scenario = self._make_scenario_with_pin(
+            db, agent_definition, organization, workspace,
+            snapshot={"agent_name": "Pinned Bot v1"},
+        )
+
+        payload = _build_sda_payload(new_dataset, agent_definition, "voice", scenario=scenario)
+
+        assert "Pinned Bot v1" in payload["requirements"]["Dataset Description"]
+        assert "Live Bot" not in payload["requirements"]["Dataset Description"]
+
+    def test_snapshot_inbound_false_wins_in_dataset_payload(
+        self, db, new_dataset, agent_definition, organization, workspace
+    ):
+        from tfc.temporal.simulate.activities import _build_sda_payload
+
+        agent_definition.inbound = True
+        agent_definition.save(update_fields=["inbound"])
+        scenario = self._make_scenario_with_pin(
+            db, agent_definition, organization, workspace,
+            snapshot={"inbound": False},
+        )
+
+        payload = _build_sda_payload(new_dataset, agent_definition, "voice", scenario=scenario)
+
+        assert "Outbound" in payload["requirements"]["Dataset Description"]
+
+    def test_no_scenario_falls_back_to_live_agent(
+        self, db, new_dataset, agent_definition, organization, workspace
+    ):
+        from tfc.temporal.simulate.activities import _build_sda_payload
+
+        agent_definition.agent_name = "Live Bot"
+        agent_definition.save(update_fields=["agent_name"])
+
+        payload = _build_sda_payload(new_dataset, agent_definition, "voice", scenario=None)
+
+        assert "Live Bot" in payload["requirements"]["Dataset Description"]
+
+
 class TestScenarioDescriptionForwarding:
     """scenario.description must flow into the EnhancedScenariosAgent constructor."""
 

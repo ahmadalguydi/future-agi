@@ -1088,10 +1088,26 @@ def _build_sda_payload(
 
     property_dict = PersonaConfigurator.get_property_dict(mode)
 
-    agent_name = getattr(agent_definition, "agent_name", "")
-    agent_description = getattr(agent_definition, "description", "")
-    agent_languages = getattr(agent_definition, "languages", [])
-    is_inbound = getattr(agent_definition, "inbound", False)
+    # Honor version-pin: prefer snapshot values over live agent fields when
+    # the scenario pins an AgentVersion. Matches the pattern used in the
+    # graph/script flows via EnhancedScenariosAgent.
+    from simulate.models.agent_version import pinned_or_live
+
+    _snap = None
+    if scenario is not None:
+        _metadata = getattr(scenario, "metadata", None) or {}
+        if isinstance(_metadata, dict):
+            _version_id = _metadata.get("agent_definition_version_id")
+            if _version_id:
+                from simulate.models.agent_version import AgentVersion
+
+                _v = AgentVersion.objects.filter(id=_version_id).first()
+                if _v:
+                    _snap = _v.configuration_snapshot
+    agent_name = pinned_or_live(_snap, agent_definition, "agent_name") or ""
+    agent_description = pinned_or_live(_snap, agent_definition, "description") or ""
+    agent_languages = pinned_or_live(_snap, agent_definition, "languages") or []
+    is_inbound = pinned_or_live(_snap, agent_definition, "inbound") or False
     call_type_val = "Inbound" if is_inbound else "Outbound"
     interaction_term = "call" if mode == "voice" else "chat session"
 
