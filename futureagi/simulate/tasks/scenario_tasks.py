@@ -366,10 +366,12 @@ def generate_scenario_rows(
         agent_definition = scenario.agent_definition
 
         from model_hub.utils.kb_indexer import build_agent_kb_payload
+        from simulate.models.agent_version import resolve_configuration_snapshot
 
         knowledge_base_payload = build_agent_kb_payload(
             agent_definition, description, scenario=scenario
         )
+        configuration_snapshot = resolve_configuration_snapshot(scenario)
 
         # Determine simulation mode
         mode = "voice" if agent_definition.agent_type == "voice" else "chat"
@@ -410,6 +412,7 @@ def generate_scenario_rows(
             custom_columns=custom_columns,
             knowledge_base=knowledge_base_payload,
             scenario_description=scenario.description,
+            configuration_snapshot=configuration_snapshot,
         )
         if custom_instruction:
             scenario_agent.custom_instruction = custom_instruction

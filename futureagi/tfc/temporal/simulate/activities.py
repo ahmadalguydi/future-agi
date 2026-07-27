@@ -3013,7 +3013,12 @@ def _setup_graph_scenario_sync(
                 scenario.save()
                 raise Exception(f"Failed to save graph data: {str(e)}")
 
-        # Serialize agent definition for passing to other activities
+        from simulate.models.agent_version import (
+            pinned_or_live as _pinned_or_live,
+            resolve_configuration_snapshot,
+        )
+
+        configuration_snapshot = resolve_configuration_snapshot(scenario)
         enhanced_agent = EnhancedScenariosAgent(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
@@ -3022,6 +3027,7 @@ def _setup_graph_scenario_sync(
                 agent_definition, scenario.description, scenario=scenario
             ),
             scenario_description=scenario.description,
+            configuration_snapshot=configuration_snapshot,
         )
         agent_definition_data = enhanced_agent.serialize_agent_definition()
 
@@ -3041,25 +3047,18 @@ def _setup_graph_scenario_sync(
                     metadata = {}
             custom_instruction = metadata.get("custom_instruction")
 
-        # Build flat agent_context for v3 activities (no ORM objects).
-        # Honor version-pin for every prompt-relevant field; ids/org/workspace
-        # come from live since the snapshot only stores UUID strings.
-        from simulate.models.agent_version import (
-            pinned_or_live as _pinned_or_live,
-            resolve_configuration_snapshot as _resolve_snapshot,
-        )
-
-        _v3_snap = _resolve_snapshot(scenario)
+        # Flat, ORM-free dict for v3 sub-activities. ids/org/workspace come from
+        # live because the snapshot stores UUID strings, not FKs.
         agent_context = {
-            "agent_name": _pinned_or_live(_v3_snap, agent_definition, "agent_name") or "",
-            "description": _pinned_or_live(_v3_snap, agent_definition, "description") or "",
+            "agent_name": _pinned_or_live(configuration_snapshot, agent_definition, "agent_name") or "",
+            "description": _pinned_or_live(configuration_snapshot, agent_definition, "description") or "",
             "agent_type": str(
-                _pinned_or_live(_v3_snap, agent_definition, "agent_type") or "voice"
+                _pinned_or_live(configuration_snapshot, agent_definition, "agent_type") or "voice"
             ),
-            "languages": _pinned_or_live(_v3_snap, agent_definition, "languages") or ["en"],
-            "language": _pinned_or_live(_v3_snap, agent_definition, "language") or "en",
-            "inbound": _pinned_or_live(_v3_snap, agent_definition, "inbound"),
-            "contact_number": _pinned_or_live(_v3_snap, agent_definition, "contact_number"),
+            "languages": _pinned_or_live(configuration_snapshot, agent_definition, "languages") or ["en"],
+            "language": _pinned_or_live(configuration_snapshot, agent_definition, "language") or "en",
+            "inbound": _pinned_or_live(configuration_snapshot, agent_definition, "inbound"),
+            "contact_number": _pinned_or_live(configuration_snapshot, agent_definition, "contact_number"),
             "agent_definition_id": str(getattr(agent_definition, "id", "")),
             "organization_id": (
                 str(agent_definition.organization.id)
@@ -3073,16 +3072,6 @@ def _setup_graph_scenario_sync(
             ),
             "mode": mode,
         }
-
-        # Load configuration_snapshot from AgentVersion if available
-        configuration_snapshot = None
-        version_id = validated_data.get("agent_definition_version_id")
-        if version_id:
-            from simulate.models.agent_version import AgentVersion
-
-            version = AgentVersion.objects.filter(id=version_id).first()
-            if version:
-                configuration_snapshot = version.configuration_snapshot
 
         # Usage emit (graph generation LLM cost)
         try:

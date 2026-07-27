@@ -1692,3 +1692,48 @@ class TestScenarioDescriptionForwarding:
             mock_agent_cls.call_args.kwargs["scenario_description"]
             == "pinned scenario description"
         )
+
+    def test_generate_scenario_rows_forwards_configuration_snapshot(
+        self, db, scenario_dataset, agent_definition, organization, workspace
+    ):
+        """Add-rows path must forward the version-pinned snapshot to the row generator constructor
+        so add-rows on a pinned scenario uses snapshot fields, not live agent state."""
+        from simulate.models.agent_version import AgentVersion
+        from simulate.tasks.scenario_tasks import generate_scenario_rows
+
+        snap = {"agent_name": "Pinned v1 Agent", "inbound": False}
+        version = AgentVersion.objects.create(
+            agent_definition=agent_definition,
+            organization=organization,
+            workspace=workspace,
+            version_number=1,
+            configuration_snapshot=snap,
+        )
+        columns = list(Column.objects.filter(dataset=scenario_dataset))
+        row_ids = TestGenerateScenarioRowsPrefetch._seed_rows(scenario_dataset, num_rows=1)
+        TestGenerateScenarioRowsPrefetch._seed_cells(scenario_dataset, columns, row_ids)
+        scenario = TestGenerateScenarioRowsPrefetch._make_scenario_and_graph(
+            scenario_dataset, agent_definition, organization, workspace
+        )
+        scenario.metadata = {"agent_definition_version_id": str(version.id)}
+        scenario.save(update_fields=["metadata"])
+        cases = TestGenerateScenarioRowsPrefetch._build_cases(1, columns)
+
+        with patch(
+            "simulate.tasks.scenario_tasks.EnhancedScenariosAgent"
+        ) as mock_agent_cls, patch(
+            "simulate.tasks.scenario_tasks.close_old_connections"
+        ):
+            mock = mock_agent_cls.return_value
+            mock.graph_generator.get_branches.return_value = []
+            mock._generate_cases_for_branches.return_value = cases
+
+            generate_scenario_rows(
+                dataset_id=scenario_dataset.id,
+                scenario_id=scenario.id,
+                num_rows=1,
+                description="anything",
+                new_rows_id=row_ids,
+            )
+
+        assert mock_agent_cls.call_args.kwargs["configuration_snapshot"] == snap
