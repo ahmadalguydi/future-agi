@@ -31,20 +31,20 @@ from agentic_eval.core.utils.model_config import (
 logger = structlog.get_logger(__name__)
 
 
-def _scenario_kb_payload(agent_or_id, description):
+def _scenario_kb_payload(agent_or_id, description, scenario=None):
     """Resolve an agent's KB into the SDA payload shape from either an object or an id."""
     if agent_or_id is None:
         return None
     from model_hub.utils.kb_indexer import build_agent_kb_payload
 
     if hasattr(agent_or_id, "knowledge_base_id"):
-        return build_agent_kb_payload(agent_or_id, description)
+        return build_agent_kb_payload(agent_or_id, description, scenario=scenario)
     from simulate.models import AgentDefinition
 
     agent = AgentDefinition.no_workspace_objects.filter(id=agent_or_id).first()
     if agent is None:
         return None
-    return build_agent_kb_payload(agent, description)
+    return build_agent_kb_payload(agent, description, scenario=scenario)
 
 
 from accounts.models.user import User
@@ -1080,12 +1080,9 @@ def _build_sda_payload(
     new_dataset: Dataset,
     agent_definition,
     mode: str,
+    scenario=None,
 ) -> dict:
-    """Build the payload for SyntheticDataAgent.generate_column_data.
-
-    Returns:
-        Dict with requirements, constraints, and schema.
-    """
+    """Build the payload for SyntheticDataAgent.generate_column_data."""
     try:
         from ee.agenthub.scenario_graph.persona_configurator import (
             PersonaConfigurator,
@@ -1173,12 +1170,21 @@ def _build_sda_payload(
         "outcome": {"type": "text"},
     }
 
-    return {
+    result = {
         "requirements": requirements,
         "constraints": constraints,
         "schema": schema,
         "property_dict": property_dict,
     }
+    if scenario is not None:
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        kb_payload = build_agent_kb_payload(
+            agent_definition, getattr(scenario, "description", None), scenario=scenario
+        )
+        if kb_payload:
+            result["knowledge_base"] = kb_payload
+    return result
 
 
 def _resolve_scenario_agent(scenario, source_type):
@@ -1516,12 +1522,16 @@ def _create_dataset_scenario_sync(
 
         # Build SDA payload for the 3 LLM-generated columns
         # (conversation_branch and branch_category are filled deterministically)
-        sda_payload_data = _build_sda_payload(new_dataset, agent_definition, mode)
+        sda_payload_data = _build_sda_payload(
+            new_dataset, agent_definition, mode, scenario=scenario
+        )
         base_payload = {
             "requirements": sda_payload_data["requirements"],
             "constraints": sda_payload_data["constraints"],
             "schema": sda_payload_data["schema"],
         }
+        if "knowledge_base" in sda_payload_data:
+            base_payload["knowledge_base"] = sda_payload_data["knowledge_base"]
         property_dict = sda_payload_data["property_dict"]
 
         # ========================================
@@ -2079,7 +2089,7 @@ def _create_script_scenario_sync(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             knowledge_base=_scenario_kb_payload(
-                agent_definition_id, scenario.description
+                agent_definition_id, scenario.description, scenario=scenario
             ),
         )
         s, d = enhanced_agent.run(
@@ -2555,7 +2565,7 @@ def _create_graph_scenario_sync(
             custom_columns=custom_columns,
             agent_definition=agent_definition,
             knowledge_base=_scenario_kb_payload(
-                agent_definition, scenario.description
+                agent_definition, scenario.description, scenario=scenario
             ),
         )
 
@@ -2999,7 +3009,7 @@ def _setup_graph_scenario_sync(
             custom_columns=custom_columns,
             agent_definition=agent_definition,
             knowledge_base=_scenario_kb_payload(
-                agent_definition, scenario.description
+                agent_definition, scenario.description, scenario=scenario
             ),
         )
         agent_definition_data = enhanced_agent.serialize_agent_definition()

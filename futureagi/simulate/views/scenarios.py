@@ -1288,7 +1288,7 @@ class AddScenarioColumnsView(APIView):
             )
 
 
-def _resolve_agent_kb_payload(agent_definition_id, description):
+def _resolve_agent_kb_payload(agent_definition_id, description, scenario=None):
     """Fetch AgentDefinition by id and resolve its KB into the SDA payload shape."""
     if not agent_definition_id:
         return None
@@ -1297,7 +1297,7 @@ def _resolve_agent_kb_payload(agent_definition_id, description):
     agent = AgentDefinition.no_workspace_objects.filter(id=agent_definition_id).first()
     if agent is None:
         return None
-    return build_agent_kb_payload(agent, description)
+    return build_agent_kb_payload(agent, description, scenario=scenario)
 
 
 # DEPRECATED: Migrated to Temporal - CreateDatasetScenarioWorkflow
@@ -1644,7 +1644,7 @@ def _deprecated_create_script_scenario_background_task(validated_data, scenario_
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             knowledge_base=_resolve_agent_kb_payload(
-                agent_definition_id, scenario.description
+                agent_definition_id, scenario.description, scenario=scenario
             ),
         )
         s, d = enhanced_agent.run(
@@ -1747,7 +1747,7 @@ def _deprecated_create_graph_scenario_background_task(validated_data, scenario_i
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             knowledge_base=_resolve_agent_kb_payload(
-                agent_definition_id, scenario.description
+                agent_definition_id, scenario.description, scenario=scenario
             ),
         )
         s, d = enhanced_agent.run(

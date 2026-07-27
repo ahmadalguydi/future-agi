@@ -181,11 +181,10 @@ def generate_scenario_columns(
             "batch_size": len(reference_rows),
         }
 
-        # Attach the agent's KB (if any) so column generation can seed from KB content.
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
         knowledge_base_payload = build_agent_kb_payload(
-            agent_definition, dataset_description
+            agent_definition, dataset_description, scenario=scenario
         )
         if knowledge_base_payload:
             payload["knowledge_base"] = knowledge_base_payload
@@ -360,10 +359,11 @@ def generate_scenario_rows(
         # Get agent definition for constraints
         agent_definition = scenario.agent_definition
 
-        # Resolve the agent's KB (if any) into the payload shape the generator expects.
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        knowledge_base_payload = build_agent_kb_payload(agent_definition, description)
+        knowledge_base_payload = build_agent_kb_payload(
+            agent_definition, description, scenario=scenario
+        )
 
         # Determine simulation mode
         mode = "voice" if agent_definition.agent_type == "voice" else "chat"
