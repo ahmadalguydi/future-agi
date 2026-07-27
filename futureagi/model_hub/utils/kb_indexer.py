@@ -34,23 +34,28 @@ KB_INDEX_COL_NAME = "chunk_text"
 
 
 def build_kb_payload(
-    kb_id: str | None, description: str | None
+    kb_id: str | None, description: str | None = None
 ) -> dict[str, Any] | None:
-    """Shape a KB UUID + description into the SDA payload dict, or None.
+    """Shape a KB UUID into the SDA payload dict, or None.
 
-    Empty / whitespace-only description short-circuits: KB retrieval needs a
-    non-empty query for the embedding model. Downstream code that iterates
-    the raw return of get_subset_kb_id assumes a list of UUIDs; guard against
-    non-iterable / stringly returns by rejecting anything not a list of
-    UUID-shaped items.
+    Scenario-generation KB seeding is agent-scoped, not scenario-scoped: the KB
+    is attached to the AgentDefinition. Per-case seed diversity comes from
+    KBSeedInstructionAgent's randomized LIMIT (ORDER BY rand()), not from a
+    per-scenario semantic filter. Passing all chunk ids of the KB gives the
+    downstream agent the full population to sample from, so:
+      * empty / absent scenario.description no longer breaks retrieval,
+      * generated cases draw from a random cross-section of the KB each time
+        (higher union coverage than a narrow query-driven slice),
+      * for large KBs, the SDA's own 10% sampling cap keeps per-case cost bounded.
+
+    The `description` parameter is retained for signature stability; it is not
+    used for retrieval.
     """
+    del description  # unused; see docstring
     if not kb_id:
         return None
-    query = (description or "").strip()
-    if not query:
-        return None
     try:
-        raw = KBIndexer().get_subset_kb_id(query, str(kb_id))
+        raw = KBIndexer().get_all_kb_doc_ids(str(kb_id))
     except Exception as exc:
         logger.warning("kb_payload_resolve_failed", kb_id=str(kb_id), error=str(exc))
         return None
@@ -326,6 +331,24 @@ class KBIndexer:
 
         # Update the chunks list with all processed chunks
         self.chunks.extend(all_chunks)
+
+    def get_all_kb_doc_ids(self, kb_id: str) -> list[str]:
+        """Return every chunk id in the KB (no semantic filter).
+
+        Used by scenario generation to seed the synthetic-data agent from a
+        random cross-section of the whole KB per case instead of a narrow
+        query-driven slice. The downstream KBSeedInstructionAgent applies its
+        own randomized LIMIT so per-case diversity is preserved for KBs of any
+        size; passing all chunk ids maximizes union coverage across cases and
+        removes the dependency on an optional user query for retrieval to work.
+        """
+        from agentic_eval.core.database.ch_vector import ClickHouseVectorDB
+
+        db = ClickHouseVectorDB()
+        rows = db.client.execute(
+            f"SELECT id FROM {KB_TABLE_NAME} WHERE eval_id = '{kb_id}' AND deleted = 0"
+        )
+        return [str(r[0]) for r in (rows or [])]
 
     def get_subset_kb_id(self, query: str, kb_id: str) -> str:
         """Get a new kb_id for the relevant chunks
