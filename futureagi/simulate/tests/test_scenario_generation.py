@@ -1049,6 +1049,11 @@ class TestKnowledgeBaseWiring:
 
         assert build_agent_kb_payload(agent_definition, "anything") is None
 
+    def test_resolve_returns_none_when_agent_or_id_is_not_a_valid_uuid(self, db):
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        assert build_agent_kb_payload("not-a-uuid", "anything") is None
+
     def test_resolve_returns_none_when_indexer_returns_empty(
         self, db, agent_definition, organization
     ):

@@ -3099,13 +3099,14 @@ def _setup_graph_scenario_sync(
         )
 
         configuration_snapshot = resolve_configuration_snapshot(scenario)
+        kb_payload = build_agent_kb_payload(
+            agent_definition, scenario.description, scenario=scenario
+        )
         enhanced_agent = EnhancedScenariosAgent(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             agent_definition=agent_definition,
-            knowledge_base=build_agent_kb_payload(
-                agent_definition, scenario.description, scenario=scenario
-            ),
+            knowledge_base=kb_payload,
             scenario_description=scenario.description,
             configuration_snapshot=configuration_snapshot,
         )
@@ -3142,9 +3143,7 @@ def _setup_graph_scenario_sync(
             "language": _pinned_or_live(configuration_snapshot, agent_definition, "language") or "en",
             "inbound": _inbound_pin if _inbound_pin is not None else True,
             "contact_number": _pinned_or_live(configuration_snapshot, agent_definition, "contact_number"),
-            "knowledge_base": build_agent_kb_payload(
-                agent_definition, scenario.description, scenario=scenario
-            ),
+            "knowledge_base": kb_payload,
             "scenario_description": scenario.description,
             "agent_definition_id": str(getattr(agent_definition, "id", "")),
             "organization_id": (

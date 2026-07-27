@@ -71,9 +71,14 @@ def build_agent_kb_payload(
     if not kb_id and not has_version_pin(scenario):
         agent = agent_or_id
         if not hasattr(agent, "knowledge_base_id"):
+            from django.core.exceptions import ValidationError
+
             from simulate.models import AgentDefinition
 
-            agent = AgentDefinition.no_workspace_objects.filter(id=agent_or_id).first()
+            try:
+                agent = AgentDefinition.no_workspace_objects.filter(id=agent_or_id).first()
+            except (ValueError, ValidationError):
+                return None
             if agent is None:
                 return None
         kb_id = getattr(agent, "knowledge_base_id", None)
