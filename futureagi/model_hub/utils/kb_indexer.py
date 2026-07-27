@@ -53,13 +53,16 @@ def build_kb_payload(kb_id, description):
     return {"table_name": KB_TABLE_NAME, "kb_id": str(kb_id), "doc_ids": doc_ids}
 
 
-def build_agent_kb_payload(agent_definition, description, scenario=None):
-    """Resolve the agent's KB into the SDA payload shape, or None.
+def build_agent_kb_payload(agent_or_id, description, scenario=None):
+    """Resolve an agent's KB into the SDA payload shape, or None.
 
-    Version pin is authoritative: if the scenario metadata pins an
-    AgentVersion, only that snapshot's knowledge_base is used (a null
-    pin means no KB, not fall back to live).
+    Accepts either an AgentDefinition instance or its UUID. Version pin
+    is authoritative: if scenario metadata pins an AgentVersion, only
+    the snapshot's knowledge_base is used (null pin means no KB, not
+    fall back to live).
     """
+    if agent_or_id is None:
+        return None
     kb_id = None
     version_pinned = False
     if scenario is not None:
@@ -74,7 +77,14 @@ def build_agent_kb_payload(agent_definition, description, scenario=None):
                 if v and v.configuration_snapshot:
                     kb_id = v.configuration_snapshot.get("knowledge_base")
     if not kb_id and not version_pinned:
-        kb_id = getattr(agent_definition, "knowledge_base_id", None)
+        agent = agent_or_id
+        if not hasattr(agent, "knowledge_base_id"):
+            from simulate.models import AgentDefinition
+
+            agent = AgentDefinition.no_workspace_objects.filter(id=agent_or_id).first()
+            if agent is None:
+                return None
+        kb_id = getattr(agent, "knowledge_base_id", None)
     return build_kb_payload(kb_id, description)
 
 

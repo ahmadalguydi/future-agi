@@ -31,23 +31,17 @@ from agentic_eval.core.utils.model_config import (
 logger = structlog.get_logger(__name__)
 
 
-def _scenario_kb_payload(agent_or_id, description, scenario=None):
-    """Resolve an agent's KB into the SDA payload shape from either an object or an id."""
-    if agent_or_id is None:
-        return None
-    from model_hub.utils.kb_indexer import build_agent_kb_payload
-
-    if hasattr(agent_or_id, "knowledge_base_id"):
-        return build_agent_kb_payload(agent_or_id, description, scenario=scenario)
-    from simulate.models import AgentDefinition
-
-    agent = AgentDefinition.no_workspace_objects.filter(id=agent_or_id).first()
-    if agent is None:
-        return None
-    return build_agent_kb_payload(agent, description, scenario=scenario)
+def _effective_persona_ids(validated_data):
+    """Personas honoring the add_persona_automatically toggle: auto=True
+    drops user picks so the SDA generates personas without constraint."""
+    if validated_data.get("add_persona_automatically", False):
+        return []
+    return validated_data.get("personas", [])
 
 
 from accounts.models.user import User
+
+from model_hub.utils.kb_indexer import build_agent_kb_payload
 
 # Use the activity-aware stub: invocations raise a Temporal non-retryable
 # ApplicationError so the workflow fails once instead of retrying.
@@ -1864,11 +1858,7 @@ def _create_dataset_scenario_sync(
         scenario.status = StatusType.COMPLETED.value
 
         # Store persona_ids in metadata if provided
-        persona_ids = (
-            []
-            if validated_data.get("add_persona_automatically", False)
-            else validated_data.get("personas", [])
-        )
+        persona_ids = _effective_persona_ids(validated_data)
         if persona_ids:
             current_metadata = scenario.metadata if scenario.metadata else {}
             if isinstance(current_metadata, str):
@@ -2046,11 +2036,7 @@ def _create_script_scenario_sync(
         no_of_rows = validated_data.get("no_of_rows", 20)
         script_url = validated_data.get("script_url")
         agent_definition_id = validated_data.get("agent_definition_id")
-        persona_ids = (
-            []
-            if validated_data.get("add_persona_automatically", False)
-            else validated_data.get("personas", [])
-        )
+        persona_ids = _effective_persona_ids(validated_data)
         custom_columns = validated_data.get("custom_columns", [])
 
         script_content = ""
@@ -2096,7 +2082,7 @@ def _create_script_scenario_sync(
             str(agent_definition_id),
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
-            knowledge_base=_scenario_kb_payload(
+            knowledge_base=build_agent_kb_payload(
                 agent_definition_id, scenario.description, scenario=scenario
             ),
             scenario_description=scenario.description,
@@ -2465,11 +2451,7 @@ def _create_graph_scenario_sync(
             logger.warning("usage_precheck_failed", exc_info=True)
 
         no_of_rows = validated_data.get("no_of_rows", 20)
-        persona_ids = (
-            []
-            if validated_data.get("add_persona_automatically", False)
-            else validated_data.get("personas", [])
-        )
+        persona_ids = _effective_persona_ids(validated_data)
         custom_columns = validated_data.get("custom_columns", [])
         transcripts = validated_data.get("transcripts", [])
         # Convert persona IDs to property_list
@@ -2577,7 +2559,7 @@ def _create_graph_scenario_sync(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             agent_definition=agent_definition,
-            knowledge_base=_scenario_kb_payload(
+            knowledge_base=build_agent_kb_payload(
                 agent_definition, scenario.description, scenario=scenario
             ),
             scenario_description=scenario.description,
@@ -2890,11 +2872,7 @@ def _setup_graph_scenario_sync(
         generate_graph = validated_data.get("generate_graph", False)
         graph_data = validated_data.get("graph")
         no_of_rows = validated_data.get("no_of_rows", 20)
-        persona_ids = (
-            []
-            if validated_data.get("add_persona_automatically", False)
-            else validated_data.get("personas", [])
-        )
+        persona_ids = _effective_persona_ids(validated_data)
         custom_columns = validated_data.get("custom_columns", [])
         transcripts = validated_data.get("transcripts", [])
 
@@ -3026,7 +3004,7 @@ def _setup_graph_scenario_sync(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             agent_definition=agent_definition,
-            knowledge_base=_scenario_kb_payload(
+            knowledge_base=build_agent_kb_payload(
                 agent_definition, scenario.description, scenario=scenario
             ),
             scenario_description=scenario.description,
