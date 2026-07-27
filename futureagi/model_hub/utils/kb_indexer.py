@@ -56,7 +56,7 @@ def build_agent_kb_payload(
     description: str | None,
     scenario: Any = None,
 ) -> dict[str, Any] | None:
-    """Resolve an agent's KB into the SDA payload shape. Version pin is authoritative."""
+    """Resolve an agent's KB into the SDA payload shape. Accepts an AgentDefinition instance or its UUID. Version pin is authoritative."""
     if agent_or_id is None:
         return None
     from simulate.models.agent_version import (

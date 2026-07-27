@@ -31,9 +31,8 @@ from agentic_eval.core.utils.model_config import (
 logger = structlog.get_logger(__name__)
 
 
-def _effective_persona_ids(validated_data):
-    """Personas honoring the add_persona_automatically toggle: auto=True
-    drops user picks so the SDA generates personas without constraint."""
+def _effective_persona_ids(validated_data: dict) -> list:
+    """Persona ids honoring add_persona_automatically: True drops user picks."""
     if validated_data.get("add_persona_automatically", False):
         return []
     return validated_data.get("personas", [])
