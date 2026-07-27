@@ -488,11 +488,23 @@ class CreateScenarioView(APIView):
                 "graph": Scenarios.ScenarioTypes.GRAPH,
             }
 
-            # Store persona_ids in metadata for future use
+            # Store persona_ids in metadata for future use. When
+            # add_persona_automatically is True the user opted into SDA-driven
+            # persona generation; drop any hand-picked personas so the row
+            # generator does not constrain the persona property_list.
             metadata = {}
-            persona_ids = validated_data.get("personas", [])
+            add_persona_automatically = validated_data.get(
+                "add_persona_automatically", False
+            )
+            persona_ids = (
+                []
+                if add_persona_automatically
+                else validated_data.get("personas", [])
+            )
             if persona_ids:
                 metadata["persona_ids"] = [str(pid) for pid in persona_ids]
+            if add_persona_automatically:
+                metadata["add_persona_automatically"] = True
 
             # Store agent_definition_version_id and custom_instruction in metadata
             agent_definition_version_id = validated_data.get(
@@ -1646,6 +1658,7 @@ def _deprecated_create_script_scenario_background_task(validated_data, scenario_
             knowledge_base=_resolve_agent_kb_payload(
                 agent_definition_id, scenario.description, scenario=scenario
             ),
+            scenario_description=scenario.description,
         )
         s, d = enhanced_agent.run(
             name=scenario.name,
@@ -1749,6 +1762,7 @@ def _deprecated_create_graph_scenario_background_task(validated_data, scenario_i
             knowledge_base=_resolve_agent_kb_payload(
                 agent_definition_id, scenario.description, scenario=scenario
             ),
+            scenario_description=scenario.description,
         )
         s, d = enhanced_agent.run(
             name=scenario.name,

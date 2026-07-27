@@ -8,6 +8,17 @@ from simulate.pydantic_schemas.agent_version import AgentConfigurationSnapshot
 from tfc.utils.base_model import BaseModel
 
 
+def pinned_or_live(configuration_snapshot, agent_definition, field_name):
+    """Return the pinned snapshot value for field_name if the snapshot has it,
+    else the live value from agent_definition. Version pin is authoritative:
+    a snapshot with an explicit non-None entry wins over live."""
+    if configuration_snapshot:
+        val = configuration_snapshot.get(field_name)
+        if val is not None:
+            return val
+    return getattr(agent_definition, field_name, None)
+
+
 class AgentVersion(BaseModel):
     """
     Model to store different versions of agent definitions

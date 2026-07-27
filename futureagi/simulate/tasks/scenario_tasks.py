@@ -403,6 +403,7 @@ def generate_scenario_rows(
             simulation_mode=mode,
             custom_columns=custom_columns,
             knowledge_base=knowledge_base_payload,
+            scenario_description=scenario.description,
         )
         if custom_instruction:
             scenario_agent.custom_instruction = custom_instruction

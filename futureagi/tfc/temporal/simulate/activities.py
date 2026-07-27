@@ -1864,7 +1864,11 @@ def _create_dataset_scenario_sync(
         scenario.status = StatusType.COMPLETED.value
 
         # Store persona_ids in metadata if provided
-        persona_ids = validated_data.get("personas", [])
+        persona_ids = (
+            []
+            if validated_data.get("add_persona_automatically", False)
+            else validated_data.get("personas", [])
+        )
         if persona_ids:
             current_metadata = scenario.metadata if scenario.metadata else {}
             if isinstance(current_metadata, str):
@@ -2042,7 +2046,11 @@ def _create_script_scenario_sync(
         no_of_rows = validated_data.get("no_of_rows", 20)
         script_url = validated_data.get("script_url")
         agent_definition_id = validated_data.get("agent_definition_id")
-        persona_ids = validated_data.get("personas", [])
+        persona_ids = (
+            []
+            if validated_data.get("add_persona_automatically", False)
+            else validated_data.get("personas", [])
+        )
         custom_columns = validated_data.get("custom_columns", [])
 
         script_content = ""
@@ -2091,6 +2099,7 @@ def _create_script_scenario_sync(
             knowledge_base=_scenario_kb_payload(
                 agent_definition_id, scenario.description, scenario=scenario
             ),
+            scenario_description=scenario.description,
         )
         s, d = enhanced_agent.run(
             name=scenario.name,
@@ -2456,7 +2465,11 @@ def _create_graph_scenario_sync(
             logger.warning("usage_precheck_failed", exc_info=True)
 
         no_of_rows = validated_data.get("no_of_rows", 20)
-        persona_ids = validated_data.get("personas", [])
+        persona_ids = (
+            []
+            if validated_data.get("add_persona_automatically", False)
+            else validated_data.get("personas", [])
+        )
         custom_columns = validated_data.get("custom_columns", [])
         transcripts = validated_data.get("transcripts", [])
         # Convert persona IDs to property_list
@@ -2567,6 +2580,7 @@ def _create_graph_scenario_sync(
             knowledge_base=_scenario_kb_payload(
                 agent_definition, scenario.description, scenario=scenario
             ),
+            scenario_description=scenario.description,
         )
 
         agent_description = getattr(agent_definition, "description", "")
@@ -2876,7 +2890,11 @@ def _setup_graph_scenario_sync(
         generate_graph = validated_data.get("generate_graph", False)
         graph_data = validated_data.get("graph")
         no_of_rows = validated_data.get("no_of_rows", 20)
-        persona_ids = validated_data.get("personas", [])
+        persona_ids = (
+            []
+            if validated_data.get("add_persona_automatically", False)
+            else validated_data.get("personas", [])
+        )
         custom_columns = validated_data.get("custom_columns", [])
         transcripts = validated_data.get("transcripts", [])
 
@@ -3011,6 +3029,7 @@ def _setup_graph_scenario_sync(
             knowledge_base=_scenario_kb_payload(
                 agent_definition, scenario.description, scenario=scenario
             ),
+            scenario_description=scenario.description,
         )
         agent_definition_data = enhanced_agent.serialize_agent_definition()
 
