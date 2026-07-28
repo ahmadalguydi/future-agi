@@ -1648,9 +1648,7 @@ def _deprecated_create_script_scenario_background_task(validated_data, scenario_
             str(agent_definition_id),
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
-            knowledge_base=build_agent_kb_payload(
-                agent_definition_id, scenario.description, scenario=scenario
-            ),
+            knowledge_base=build_agent_kb_payload(agent_definition_id, scenario=scenario),
             scenario_description=scenario.description,
         )
         s, d = enhanced_agent.run(
@@ -1756,9 +1754,7 @@ def _deprecated_create_graph_scenario_background_task(validated_data, scenario_i
             str(agent_definition_id),
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
-            knowledge_base=build_agent_kb_payload(
-                agent_definition_id, scenario.description, scenario=scenario
-            ),
+            knowledge_base=build_agent_kb_payload(agent_definition_id, scenario=scenario),
             scenario_description=scenario.description,
         )
         s, d = enhanced_agent.run(

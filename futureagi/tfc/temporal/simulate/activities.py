@@ -1210,9 +1210,7 @@ def _build_sda_payload(
     if scenario is not None:
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        kb_payload = build_agent_kb_payload(
-            agent_definition, getattr(scenario, "description", None), scenario=scenario
-        )
+        kb_payload = build_agent_kb_payload(agent_definition, scenario=scenario)
         if kb_payload:
             result["knowledge_base"] = kb_payload
     return result
@@ -2138,9 +2136,7 @@ def _create_script_scenario_sync(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             agent_definition=agent_definition,
-            knowledge_base=build_agent_kb_payload(
-                agent_definition, scenario.description, scenario=scenario
-            ),
+            knowledge_base=build_agent_kb_payload(agent_definition, scenario=scenario),
             scenario_description=scenario.description,
         )
         s, d = enhanced_agent.run(
@@ -2562,9 +2558,7 @@ def _create_graph_scenario_sync(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,
             agent_definition=agent_definition,
-            knowledge_base=build_agent_kb_payload(
-                agent_definition, scenario.description, scenario=scenario
-            ),
+            knowledge_base=build_agent_kb_payload(agent_definition, scenario=scenario),
             scenario_description=scenario.description,
         )
 
@@ -2971,9 +2965,7 @@ def _setup_graph_scenario_sync(
         )
 
         configuration_snapshot = resolve_configuration_snapshot(scenario)
-        kb_payload = build_agent_kb_payload(
-            agent_definition, scenario.description, scenario=scenario
-        )
+        kb_payload = build_agent_kb_payload(agent_definition, scenario=scenario)
         enhanced_agent = EnhancedScenariosAgent(
             no_of_rows=no_of_rows,
             custom_columns=custom_columns,

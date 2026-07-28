@@ -189,9 +189,7 @@ def generate_scenario_columns(
 
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        knowledge_base_payload = build_agent_kb_payload(
-            agent_definition, dataset_description, scenario=scenario
-        )
+        knowledge_base_payload = build_agent_kb_payload(agent_definition, scenario=scenario)
         if knowledge_base_payload:
             payload["knowledge_base"] = knowledge_base_payload
 
@@ -370,9 +368,7 @@ def generate_scenario_rows(
         from model_hub.utils.kb_indexer import build_agent_kb_payload
         from simulate.models.agent_version import resolve_configuration_snapshot
 
-        knowledge_base_payload = build_agent_kb_payload(
-            agent_definition, description, scenario=scenario
-        )
+        knowledge_base_payload = build_agent_kb_payload(agent_definition, scenario=scenario)
         configuration_snapshot = resolve_configuration_snapshot(scenario)
 
         # Determine simulation mode

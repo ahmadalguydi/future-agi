@@ -1047,12 +1047,12 @@ class TestKnowledgeBaseWiring:
     def test_resolve_returns_none_when_agent_has_no_kb(self, db, agent_definition):
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        assert build_agent_kb_payload(agent_definition, "anything") is None
+        assert build_agent_kb_payload(agent_definition) is None
 
     def test_resolve_returns_none_when_agent_or_id_is_not_a_valid_uuid(self, db):
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        assert build_agent_kb_payload("not-a-uuid", "anything") is None
+        assert build_agent_kb_payload("not-a-uuid") is None
 
     def test_resolve_returns_none_when_indexer_returns_empty(
         self, db, agent_definition, organization
@@ -1065,9 +1065,9 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id", return_value=[]
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample", return_value=[]
         ):
-            payload = build_agent_kb_payload(agent_definition, "anything")
+            payload = build_agent_kb_payload(agent_definition)
 
         assert payload is None
 
@@ -1083,13 +1083,13 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=[
                 "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
                 "e6c1fd97-0444-4292-9165-023cc80dce6a",
             ],
         ) as mock_get:
-            payload = build_agent_kb_payload(agent_definition, "scenario desc")
+            payload = build_agent_kb_payload(agent_definition)
 
         mock_get.assert_called_once()
         assert payload == {
@@ -1112,10 +1112,10 @@ class TestKnowledgeBaseWiring:
         agent_definition.save(update_fields=["knowledge_base"])
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             side_effect=RuntimeError("boom"),
         ):
-            payload = build_agent_kb_payload(agent_definition, "anything")
+            payload = build_agent_kb_payload(agent_definition)
 
         assert payload is None
 
@@ -1145,7 +1145,7 @@ class TestKnowledgeBaseWiring:
         ) as mock_agent_cls, patch(
             "simulate.tasks.scenario_tasks.close_old_connections"
         ), patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
             agent = mock_agent_cls.return_value
@@ -1263,27 +1263,27 @@ class TestBuildKbPayload:
     def test_none_kb_id_returns_none(self):
         from model_hub.utils.kb_indexer import build_kb_payload
 
-        assert build_kb_payload(None, "any description") is None
+        assert build_kb_payload(None) is None
 
     def test_empty_doc_ids_returns_none(self):
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id", return_value=[]
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample", return_value=[]
         ):
-            assert build_kb_payload("kb-uuid", "desc") is None
+            assert build_kb_payload("kb-uuid") is None
 
     def test_returns_shaped_dict_when_docs_present(self):
         from model_hub.utils.kb_indexer import KB_TABLE_NAME, build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=[
                 "7c23b7c0-0fc4-4a4f-b3f3-693efd733453",
                 "e6c1fd97-0444-4292-9165-023cc80dce6a",
             ],
         ):
-            payload = build_kb_payload("kb-uuid", "desc")
+            payload = build_kb_payload("kb-uuid")
 
         assert payload == {
             "table_name": KB_TABLE_NAME,
@@ -1298,47 +1298,47 @@ class TestBuildKbPayload:
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             side_effect=RuntimeError("boom"),
         ):
-            assert build_kb_payload("kb-uuid", "desc") is None
+            assert build_kb_payload("kb-uuid") is None
 
     def test_non_uuid_items_filtered_out(self):
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["c", "f", "d", "cfd0e8a2-3064-489a-bf3f-43c430680f44"],
         ):
-            payload = build_kb_payload("kb-uuid", "desc")
+            payload = build_kb_payload("kb-uuid")
             assert payload is not None
             assert payload["doc_ids"] == ["cfd0e8a2-3064-489a-bf3f-43c430680f44"]
 
-    def test_description_is_forwarded_to_semantic_subset(self):
-        from model_hub.utils.kb_indexer import build_kb_payload
+    def test_default_cap_passed_to_sampler(self):
+        from model_hub.utils.kb_indexer import (
+            KB_DOC_ID_PAYLOAD_CAP,
+            build_kb_payload,
+        )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["cfd0e8a2-3064-489a-bf3f-43c430680f44"],
-        ) as mock_subset:
-            build_kb_payload("kb-uuid", "Enterprise onboarding")
-        mock_subset.assert_called_once()
-        args, _ = mock_subset.call_args
-        assert args[0] == "Enterprise onboarding"
-        assert args[1] == "kb-uuid"
+        ) as mock_sample:
+            build_kb_payload("kb-uuid")
+        mock_sample.assert_called_once()
+        args, _ = mock_sample.call_args
+        assert args[0] == "kb-uuid"
+        assert args[1] == KB_DOC_ID_PAYLOAD_CAP
 
-    def test_empty_description_calls_subset_with_empty_string(self):
+    def test_explicit_max_count_forwarded(self):
         from model_hub.utils.kb_indexer import build_kb_payload
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=[],
-        ) as mock_subset:
-            for desc in ("", None):
-                assert build_kb_payload("kb-uuid", desc) is None
-        assert mock_subset.call_count == 2
-        for call in mock_subset.call_args_list:
-            assert call.args[0] == ""
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
+            return_value=["cfd0e8a2-3064-489a-bf3f-43c430680f44"],
+        ) as mock_sample:
+            build_kb_payload("kb-uuid", 50)
+        assert mock_sample.call_args.args[1] == 50
 
 
 class TestBuildAgentKbPayloadVersionPin:
@@ -1390,12 +1390,10 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
         ):
-            payload = build_agent_kb_payload(
-                agent_definition, "desc", scenario=scenario
-            )
+            payload = build_agent_kb_payload(agent_definition, scenario=scenario)
 
         assert payload["kb_id"] == str(pinned_kb.id)
         assert payload["kb_id"] != str(_kb.id)
@@ -1413,12 +1411,10 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
-            payload = build_agent_kb_payload(
-                agent_definition, "desc", scenario=scenario
-            )
+            payload = build_agent_kb_payload(agent_definition, scenario=scenario)
 
         assert payload is None
 
@@ -1442,130 +1438,11 @@ class TestBuildAgentKbPayloadVersionPin:
         )
 
         with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            "model_hub.utils.kb_indexer.KBIndexer.get_kb_doc_id_sample",
             return_value=["e6c1fd97-0444-4292-9165-023cc80dce6a"],
         ):
-            payload = build_agent_kb_payload(
-                agent_definition, "desc", scenario=scenario
-            )
+            payload = build_agent_kb_payload(agent_definition, scenario=scenario)
 
-        assert payload is None
-
-
-class TestBuildAgentKbPayloadQueryFallbackChain:
-    """Retrieval query resolution: description -> snapshot.description -> live agent.description -> ''."""
-
-    @pytest.fixture
-    def _kb(self, db, organization):
-        from model_hub.models.develop_dataset import KnowledgeBaseFile
-
-        return KnowledgeBaseFile.objects.create(name="kb", organization=organization)
-
-    def _agent_with_kb_and_desc(self, agent_definition, kb, description):
-        agent_definition.knowledge_base = kb
-        agent_definition.description = description
-        agent_definition.save(update_fields=["knowledge_base", "description"])
-        return agent_definition
-
-    def _pinned_scenario(self, agent_definition, organization, workspace, snapshot):
-        from simulate.models.agent_version import AgentVersion
-
-        version = AgentVersion.objects.create(
-            agent_definition=agent_definition,
-            organization=organization,
-            workspace=workspace,
-            version_number=1,
-            configuration_snapshot=snapshot,
-        )
-        return Scenarios.objects.create(
-            name="s",
-            source="x",
-            scenario_type=Scenarios.ScenarioTypes.GRAPH,
-            organization=organization,
-            workspace=workspace,
-            agent_definition=agent_definition,
-            metadata={"agent_definition_version_id": str(version.id)},
-            description="",
-        )
-
-    def test_explicit_description_wins_when_present(
-        self, db, agent_definition, organization, _kb
-    ):
-        from model_hub.utils.kb_indexer import build_agent_kb_payload
-
-        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
-        with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
-        ) as mock_subset:
-            build_agent_kb_payload(agent_definition, "EXPLICIT_QUERY")
-        assert mock_subset.call_args.args[0] == "EXPLICIT_QUERY"
-
-    def test_falls_back_to_live_agent_description_when_no_pin(
-        self, db, agent_definition, organization, _kb
-    ):
-        from model_hub.utils.kb_indexer import build_agent_kb_payload
-
-        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
-        with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
-        ) as mock_subset:
-            build_agent_kb_payload(agent_definition, "")
-        assert mock_subset.call_args.args[0] == "LIVE_AGENT_DESC"
-
-    def test_pinned_snapshot_description_wins_over_live(
-        self, db, agent_definition, organization, workspace, _kb
-    ):
-        from model_hub.utils.kb_indexer import build_agent_kb_payload
-
-        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
-        scenario = self._pinned_scenario(
-            agent_definition, organization, workspace,
-            snapshot={
-                "knowledge_base": str(_kb.id),
-                "description": "SNAPSHOT_DESC",
-            },
-        )
-        with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
-        ) as mock_subset:
-            build_agent_kb_payload(agent_definition, "", scenario=scenario)
-        assert mock_subset.call_args.args[0] == "SNAPSHOT_DESC"
-        assert mock_subset.call_args.args[0] != "LIVE_AGENT_DESC"
-
-    def test_pinned_snapshot_missing_description_does_not_fall_to_live(
-        self, db, agent_definition, organization, workspace, _kb
-    ):
-        """Pin authority regression: snapshot missing description key must NOT fall to live."""
-        from model_hub.utils.kb_indexer import build_agent_kb_payload
-
-        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
-        scenario = self._pinned_scenario(
-            agent_definition, organization, workspace,
-            snapshot={"knowledge_base": str(_kb.id)},  # no 'description' key
-        )
-        with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
-        ) as mock_subset:
-            build_agent_kb_payload(agent_definition, "", scenario=scenario)
-        assert mock_subset.call_args.args[0] == ""
-        assert mock_subset.call_args.args[0] != "LIVE_AGENT_DESC"
-
-    def test_empty_everywhere_passes_empty_string(
-        self, db, agent_definition, organization, _kb
-    ):
-        from model_hub.utils.kb_indexer import build_agent_kb_payload
-
-        self._agent_with_kb_and_desc(agent_definition, _kb, "")
-        with patch(
-            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
-            return_value=[],
-        ) as mock_subset:
-            payload = build_agent_kb_payload(agent_definition, "")
-        assert mock_subset.call_args.args[0] == ""
         assert payload is None
 
 
@@ -1575,17 +1452,17 @@ class TestBuildAgentKbPayloadNonUuidGuard:
     def test_non_uuid_string_returns_none(self, db):
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        assert build_agent_kb_payload("not-a-uuid-at-all", "any") is None
+        assert build_agent_kb_payload("not-a-uuid-at-all") is None
 
     def test_integer_agent_or_id_returns_none(self, db):
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        assert build_agent_kb_payload(12345, "any") is None
+        assert build_agent_kb_payload(12345) is None
 
     def test_none_agent_or_id_short_circuits(self, db):
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
-        assert build_agent_kb_payload(None, "any") is None
+        assert build_agent_kb_payload(None) is None
 
 
 class TestColumnDefinitionSerializerProperty:

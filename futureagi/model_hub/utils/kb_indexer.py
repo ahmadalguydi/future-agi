@@ -31,16 +31,17 @@ from tfc.utils.storage_client import get_storage_client
 KB_TABLE_NAME = "syn"
 KB_INDEX_COL_TYPE = "text"
 KB_INDEX_COL_NAME = "chunk_text"
+KB_DOC_ID_PAYLOAD_CAP = 200
 
 
 def build_kb_payload(
-    kb_id: str | None, description: str | None
+    kb_id: str | None, max_count: int = KB_DOC_ID_PAYLOAD_CAP
 ) -> dict[str, Any] | None:
-    """Semantic-subset KB payload dict, or None on empty query / no chunks / error."""
+    """Random-sampled KB payload dict (up to `max_count` chunk ids), or None."""
     if not kb_id:
         return None
     try:
-        raw = KBIndexer().get_subset_kb_id(description or "", str(kb_id))
+        raw = KBIndexer().get_kb_doc_id_sample(str(kb_id), max_count)
     except Exception as exc:
         logger.warning("kb_payload_resolve_failed", kb_id=str(kb_id), error=str(exc))
         return None
@@ -54,10 +55,9 @@ def build_kb_payload(
 
 def build_agent_kb_payload(
     agent_or_id: Any,
-    description: str | None,
     scenario: Any = None,
 ) -> dict[str, Any] | None:
-    """Resolve KB id + retrieval query for the agent. Version pin is authoritative."""
+    """Resolve the agent's KB id (pinned snapshot wins over live) into a payload, or None."""
     if agent_or_id is None:
         return None
     from simulate.models.agent_version import (
@@ -67,7 +67,6 @@ def build_agent_kb_payload(
 
     snapshot = resolve_configuration_snapshot(scenario)
     kb_id = snapshot.get("knowledge_base") if snapshot else None
-    prompt_fallback = snapshot.get("description") if snapshot else None
     if not kb_id and not has_version_pin(scenario):
         agent = agent_or_id
         if not hasattr(agent, "knowledge_base_id"):
@@ -82,9 +81,7 @@ def build_agent_kb_payload(
             if agent is None:
                 return None
         kb_id = getattr(agent, "knowledge_base_id", None)
-        if not prompt_fallback:
-            prompt_fallback = getattr(agent, "description", None)
-    return build_kb_payload(kb_id, description or prompt_fallback or "")
+    return build_kb_payload(kb_id)
 
 
 @dataclass
@@ -325,26 +322,17 @@ class KBIndexer:
         # Update the chunks list with all processed chunks
         self.chunks.extend(all_chunks)
 
-    def get_subset_kb_id(self, query: str, kb_id: str) -> str:
-        """Get a new kb_id for the relevant chunks
+    def get_kb_doc_id_sample(self, kb_id: str, max_count: int = KB_DOC_ID_PAYLOAD_CAP) -> list[str]:
+        """Random sample of up to `max_count` chunk ids from the KB (raw ClickHouse LIMIT)."""
+        from agentic_eval.core.database.ch_vector import ClickHouseVectorDB
 
-        Args:
-            query: Query to find relevant chunks
-            kb_id: Original document ID
-
-        Returns:
-            str: New document ID for the subset of chunks
-        """
-        # Call get_relevant_chunks, which returns only the new doc_id.
-        new_kb_id = self.embedding_manager.get_relevant_chunks(
-            query=query,
-            table_name=KB_TABLE_NAME,
-            eval_id=kb_id,
-            index_col_type=[KB_INDEX_COL_TYPE],
-            input_cols=KB_INDEX_COL_NAME,
+        db = ClickHouseVectorDB()
+        rows = db.client.execute(
+            f"SELECT id FROM {KB_TABLE_NAME} "
+            f"WHERE eval_id = '{kb_id}' AND deleted = 0 "
+            f"ORDER BY rand() LIMIT {int(max_count)}"
         )
-
-        return new_kb_id
+        return [str(r[0]) for r in (rows or [])]
 
     def get_data_subset_kb_id(
         self, query: list[str], kb_id: str, top_k: int = 4

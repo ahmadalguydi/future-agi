@@ -414,9 +414,7 @@ def create_synthetic_dataset(
             },
             "batch_size": validated_data["num_rows"],
         }
-        kb_payload = build_kb_payload(
-            validated_data.get("kb_id"), validated_data["dataset"]["description"]
-        )
+        kb_payload = build_kb_payload(validated_data.get("kb_id"))
         if kb_payload:
             payload["knowledge_base"] = kb_payload
 
