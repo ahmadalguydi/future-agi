@@ -23,11 +23,7 @@ def apply_custom_column_constraints(
     *,
     branch_context_footer: str = "",
 ) -> None:
-    """Append `custom_columns` entries to `constraints` and `schema`, in place.
-
-    A new FE column type or property default only needs to change here so
-    every scenario-generation entry point emits identical constraint shapes.
-    """
+    """Append `custom_columns` entries to `constraints` and `schema`, in place."""
     if not custom_columns:
         return
     for column in custom_columns:

@@ -1517,7 +1517,6 @@ class TestBuildAgentKbPayloadQueryFallbackChain:
     def test_pinned_snapshot_description_wins_over_live(
         self, db, agent_definition, organization, workspace, _kb
     ):
-        """Pin authority: when pinned, live agent's description is NEVER used as fallback."""
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
         self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
@@ -1539,8 +1538,7 @@ class TestBuildAgentKbPayloadQueryFallbackChain:
     def test_pinned_snapshot_missing_description_does_not_fall_to_live(
         self, db, agent_definition, organization, workspace, _kb
     ):
-        """Pin authority regression: snapshot has no description key AND scenario desc empty.
-        Must NOT fall through to live agent's description."""
+        """Pin authority regression: snapshot missing description key must NOT fall to live."""
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
         self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
@@ -1559,7 +1557,6 @@ class TestBuildAgentKbPayloadQueryFallbackChain:
     def test_empty_everywhere_passes_empty_string(
         self, db, agent_definition, organization, _kb
     ):
-        """No description anywhere: empty string reaches subset. Downstream returns [] -> None."""
         from model_hub.utils.kb_indexer import build_agent_kb_payload
 
         self._agent_with_kb_and_desc(agent_definition, _kb, "")
@@ -2058,7 +2055,6 @@ class TestApplyCustomColumnConstraints:
         assert constraints[0]["content"] == expected
 
     def test_content_string_without_footer(self):
-        """Outer caller path passes no footer; string must end at 'below.' with no trailing garbage."""
         from simulate.utils.scenario_constraints import apply_custom_column_constraints
 
         constraints, schema = [], {}
@@ -2075,7 +2071,6 @@ class TestApplyCustomColumnConstraints:
         assert constraints[0]["content"] == expected
 
     def test_multiple_columns_all_landed(self):
-        """Loop invariant: N columns -> N constraint entries + N schema entries."""
         from simulate.utils.scenario_constraints import apply_custom_column_constraints
 
         cols = [
@@ -2139,10 +2134,6 @@ class TestEffectivePersonaIds:
 
 
 class TestResolveScenarioAgent:
-    """Unification path: agent_definition scenarios return the real model;
-    prompt-workbench scenarios return a SimpleNamespace adapter with the
-    same fields the downstream code reads via getattr / pinned_or_live."""
-
     def test_agent_definition_source_returns_real_instance(
         self, db, agent_definition, organization, workspace
     ):
@@ -2198,7 +2189,6 @@ class TestResolveScenarioAgent:
     def test_prompt_source_with_no_template_falls_through(
         self, db, agent_definition, organization, workspace
     ):
-        """When source_type='prompt' but prompt_template is None, helper returns scenario.agent_definition."""
         from tfc.temporal.simulate.activities import _resolve_scenario_agent
 
         scenario = Scenarios.objects.create(

@@ -102,6 +102,14 @@ def generate_scenario_columns(
         agent_name = pinned_or_live(_snap, agent_definition, "agent_name") or ""
         agent_description = pinned_or_live(_snap, agent_definition, "description") or ""
         agent_language = pinned_or_live(_snap, agent_definition, "language") or ""
+        logger.info(
+            "simgen_dbg.add_columns.pinned_reads",
+            scenario_id=str(getattr(scenario, "id", None) or ""),
+            pinned=bool(_snap),
+            agent_name=agent_name,
+            agent_description_len=len(agent_description),
+            agent_language=agent_language,
+        )
         dataset_objective = dataset_metadata.get("objective") or (
             f"Generate realistic values for the newly added columns within scenario '{scenario.name}' "
             f"for agent '{agent_name}' focused on {agent_description}."
@@ -194,12 +202,15 @@ def generate_scenario_columns(
         )
         if knowledge_base_payload:
             payload["knowledge_base"] = knowledge_base_payload
-
         logger.info(
-            "Generating scenario columns for dataset %s (%d columns, %d reference rows)",
-            dataset_id,
-            len(new_columns_required_info),
-            len(reference_rows),
+            "simgen_dbg.add_columns.payload_built",
+            scenario_id=str(getattr(scenario, "id", None) or ""),
+            dataset_id=str(dataset_id),
+            new_columns=[c.get("name") for c in new_columns_required_info],
+            reference_rows_count=len(reference_rows),
+            kb_present=bool(knowledge_base_payload),
+            kb_id=(knowledge_base_payload or {}).get("kb_id"),
+            reference_data_present="reference_data" in payload,
         )
 
         synthetic_columns = asyncio.run(agent.generate_column_data(payload))
@@ -362,8 +373,16 @@ def generate_scenario_rows(
                 metadata = json.loads(metadata)
             persona_ids = metadata.get("persona_ids", None)
             custom_instruction = metadata.get("custom_instruction", None)
-            if metadata.get("add_persona_automatically"):
+            _add_auto = metadata.get("add_persona_automatically")
+            if _add_auto:
                 persona_ids = None
+            logger.info(
+                "simgen_dbg.add_rows.metadata_read",
+                scenario_id=str(scenario_id),
+                add_persona_automatically=_add_auto,
+                persona_ids_after_override=persona_ids,
+                custom_instruction_present=bool(custom_instruction),
+            )
         # Get agent definition for constraints
         agent_definition = scenario.agent_definition
 
@@ -406,6 +425,16 @@ def generate_scenario_rows(
                 }
             )
 
+        logger.info(
+            "simgen_dbg.add_rows.constructor_inputs",
+            scenario_id=str(scenario_id),
+            pinned=bool(configuration_snapshot),
+            pinned_agent_name=(configuration_snapshot or {}).get("agent_name"),
+            kb_present=bool(knowledge_base_payload),
+            kb_id=(knowledge_base_payload or {}).get("kb_id"),
+            scenario_description_present=bool(scenario.description),
+            custom_columns_count=len(custom_columns),
+        )
         # Instantiate EnhancedScenariosAgent - it handles everything!
         scenario_agent = EnhancedScenariosAgent(
             agent_definition_id=agent_definition.id,

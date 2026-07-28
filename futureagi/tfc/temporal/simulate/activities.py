@@ -33,9 +33,16 @@ logger = structlog.get_logger(__name__)
 
 def _effective_persona_ids(validated_data: dict) -> list:
     """Persona ids honoring add_persona_automatically: True drops user picks."""
-    if validated_data.get("add_persona_automatically", False):
-        return []
-    return validated_data.get("personas", [])
+    auto_flag = validated_data.get("add_persona_automatically", False)
+    raw = validated_data.get("personas", [])
+    result = [] if auto_flag else raw
+    logger.info(
+        "simgen_dbg.effective_persona_ids",
+        add_persona_automatically=auto_flag,
+        raw_count=len(raw),
+        effective_count=len(result),
+    )
+    return result
 
 
 from accounts.models.user import User
@@ -1215,6 +1222,21 @@ def _build_sda_payload(
         )
         if kb_payload:
             result["knowledge_base"] = kb_payload
+    logger.info(
+        "simgen_dbg.build_sda_payload.dataset_flow",
+        scenario_id=str(getattr(scenario, "id", None) or ""),
+        agent_name=agent_name,
+        agent_description_len=len(agent_description or ""),
+        inbound=is_inbound,
+        kb_present="knowledge_base" in result,
+        kb_id=(result.get("knowledge_base") or {}).get("kb_id"),
+        custom_instruction_present=bool(custom_instruction),
+        custom_instruction_snippet=(custom_instruction or "")[:80],
+        scenario_focus_in_desc="Scenario focus" in result["requirements"]["Dataset Description"],
+        constraints_count=len(constraints),
+        constraint_fields=[c["field"] for c in constraints],
+        custom_columns_count=len(custom_columns),
+    )
     return result
 
 
@@ -1385,6 +1407,15 @@ def _create_dataset_scenario_sync(
                         _meta = {}
                 if isinstance(_meta, dict):
                     custom_instruction_input = _meta.get("custom_instruction")
+            logger.info(
+                "simgen_dbg.dataset_flow.inputs_extracted",
+                scenario_id=str(scenario_id),
+                custom_columns_count=len(custom_columns_input),
+                custom_columns_names=[c.get("name") for c in custom_columns_input],
+                custom_instruction_present=bool(custom_instruction_input),
+                custom_instruction_snippet=(custom_instruction_input or "")[:80],
+                metadata_keys=list(scenario.metadata.keys()) if scenario.metadata else [],
+            )
             new_scenario_columns, scenario_columns_config = _add_scenario_columns(
                 new_dataset,
                 existing_column_names,
@@ -3030,6 +3061,19 @@ def _setup_graph_scenario_sync(
             ),
             "mode": mode,
         }
+        logger.info(
+            "simgen_dbg.setup_graph.agent_context_built",
+            scenario_id=str(scenario_id),
+            pinned=bool(configuration_snapshot),
+            agent_name=agent_context.get("agent_name"),
+            description_len=len(agent_context.get("description") or ""),
+            kb_present=bool(agent_context.get("knowledge_base")),
+            kb_id=(agent_context.get("knowledge_base") or {}).get("kb_id"),
+            scenario_description_present=bool(agent_context.get("scenario_description")),
+            scenario_description_snippet=(agent_context.get("scenario_description") or "")[:80],
+            inbound=agent_context.get("inbound"),
+            custom_instruction_present=bool(custom_instruction),
+        )
 
         # Usage emit (graph generation LLM cost)
         try:
@@ -3206,6 +3250,14 @@ def _extract_intents_sync(
             logger.warning("usage_precheck_failed", exc_info=True)
 
         agent_description = agent_definition_data.get("description", "")
+        logger.info(
+            "simgen_dbg.extract_intents.entry",
+            graph_id=str(graph_id),
+            agent_name_from_data=agent_definition_data.get("agent_name"),
+            agent_description_snippet=(agent_description or "")[:180],
+            agent_definition_data_keys=list(agent_definition_data.keys()),
+            transcripts_count=len(transcripts) if hasattr(transcripts, "__len__") else 0,
+        )
 
         def get_user_intent(
             transcript: str, agent_desc: str, audio_url: str = None
