@@ -322,6 +322,27 @@ class KBIndexer:
         # Update the chunks list with all processed chunks
         self.chunks.extend(all_chunks)
 
+    def get_subset_kb_id(self, query: str, kb_id: str) -> str:
+        """Get a new kb_id for the relevant chunks
+
+        Args:
+            query: Query to find relevant chunks
+            kb_id: Original document ID
+
+        Returns:
+            str: New document ID for the subset of chunks
+        """
+        # Call get_relevant_chunks, which returns only the new doc_id.
+        new_kb_id = self.embedding_manager.get_relevant_chunks(
+            query=query,
+            table_name=KB_TABLE_NAME,
+            eval_id=kb_id,
+            index_col_type=[KB_INDEX_COL_TYPE],
+            input_cols=KB_INDEX_COL_NAME,
+        )
+
+        return new_kb_id
+
     def get_kb_doc_id_sample(self, kb_id: str, max_count: int = KB_DOC_ID_PAYLOAD_CAP) -> list[str]:
         """Random sample of up to `max_count` chunk ids from the KB (raw ClickHouse LIMIT)."""
         try:
