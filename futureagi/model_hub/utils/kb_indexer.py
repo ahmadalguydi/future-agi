@@ -324,12 +324,16 @@ class KBIndexer:
 
     def get_kb_doc_id_sample(self, kb_id: str, max_count: int = KB_DOC_ID_PAYLOAD_CAP) -> list[str]:
         """Random sample of up to `max_count` chunk ids from the KB (raw ClickHouse LIMIT)."""
+        try:
+            kb_uuid = str(uuid.UUID(str(kb_id)))
+        except (ValueError, AttributeError, TypeError):
+            return []
         from agentic_eval.core.database.ch_vector import ClickHouseVectorDB
 
         db = ClickHouseVectorDB()
         rows = db.client.execute(
             f"SELECT id FROM {KB_TABLE_NAME} "
-            f"WHERE eval_id = '{kb_id}' AND deleted = 0 "
+            f"WHERE eval_id = '{kb_uuid}' AND deleted = 0 "
             f"ORDER BY rand() LIMIT {int(max_count)}"
         )
         return [str(r[0]) for r in (rows or [])]
