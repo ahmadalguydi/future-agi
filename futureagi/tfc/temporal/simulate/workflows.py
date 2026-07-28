@@ -725,15 +725,10 @@ class CreateGraphScenarioWorkflow:
             # Step 5: Finalize scenario + clean up Redis keys.
             # add_persona_automatically=True drops user-picked personas so the
             # finalize write does not overwrite the empty property_list intent.
-            _auto_v3 = input.validated_data.get("add_persona_automatically", False)
-            _raw_v3 = input.validated_data.get("personas", [])
-            persona_ids = [] if _auto_v3 else _raw_v3
-            workflow.logger.info(
-                "simgen_dbg.workflow_v3.finalize_persona_ids scenario_id=%s auto=%s raw=%d effective=%d",
-                input.scenario_id,
-                _auto_v3,
-                len(_raw_v3),
-                len(persona_ids),
+            persona_ids = (
+                []
+                if input.validated_data.get("add_persona_automatically", False)
+                else input.validated_data.get("personas", [])
             )
             finalize_result = await workflow.execute_activity(
                 "finalize_graph_scenario_activity",
