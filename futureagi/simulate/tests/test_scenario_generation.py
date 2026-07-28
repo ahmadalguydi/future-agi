@@ -1452,6 +1452,145 @@ class TestBuildAgentKbPayloadVersionPin:
         assert payload is None
 
 
+class TestBuildAgentKbPayloadQueryFallbackChain:
+    """Retrieval query resolution: description -> snapshot.description -> live agent.description -> ''."""
+
+    @pytest.fixture
+    def _kb(self, db, organization):
+        from model_hub.models.develop_dataset import KnowledgeBaseFile
+
+        return KnowledgeBaseFile.objects.create(name="kb", organization=organization)
+
+    def _agent_with_kb_and_desc(self, agent_definition, kb, description):
+        agent_definition.knowledge_base = kb
+        agent_definition.description = description
+        agent_definition.save(update_fields=["knowledge_base", "description"])
+        return agent_definition
+
+    def _pinned_scenario(self, agent_definition, organization, workspace, snapshot):
+        from simulate.models.agent_version import AgentVersion
+
+        version = AgentVersion.objects.create(
+            agent_definition=agent_definition,
+            organization=organization,
+            workspace=workspace,
+            version_number=1,
+            configuration_snapshot=snapshot,
+        )
+        return Scenarios.objects.create(
+            name="s",
+            source="x",
+            scenario_type=Scenarios.ScenarioTypes.GRAPH,
+            organization=organization,
+            workspace=workspace,
+            agent_definition=agent_definition,
+            metadata={"agent_definition_version_id": str(version.id)},
+            description="",
+        )
+
+    def test_explicit_description_wins_when_present(
+        self, db, agent_definition, organization, _kb
+    ):
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
+        ) as mock_subset:
+            build_agent_kb_payload(agent_definition, "EXPLICIT_QUERY")
+        assert mock_subset.call_args.args[0] == "EXPLICIT_QUERY"
+
+    def test_falls_back_to_live_agent_description_when_no_pin(
+        self, db, agent_definition, organization, _kb
+    ):
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
+        ) as mock_subset:
+            build_agent_kb_payload(agent_definition, "")
+        assert mock_subset.call_args.args[0] == "LIVE_AGENT_DESC"
+
+    def test_pinned_snapshot_description_wins_over_live(
+        self, db, agent_definition, organization, workspace, _kb
+    ):
+        """Pin authority: when pinned, live agent's description is NEVER used as fallback."""
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
+        scenario = self._pinned_scenario(
+            agent_definition, organization, workspace,
+            snapshot={
+                "knowledge_base": str(_kb.id),
+                "description": "SNAPSHOT_DESC",
+            },
+        )
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
+        ) as mock_subset:
+            build_agent_kb_payload(agent_definition, "", scenario=scenario)
+        assert mock_subset.call_args.args[0] == "SNAPSHOT_DESC"
+        assert mock_subset.call_args.args[0] != "LIVE_AGENT_DESC"
+
+    def test_pinned_snapshot_missing_description_does_not_fall_to_live(
+        self, db, agent_definition, organization, workspace, _kb
+    ):
+        """Pin authority regression: snapshot has no description key AND scenario desc empty.
+        Must NOT fall through to live agent's description."""
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb_and_desc(agent_definition, _kb, "LIVE_AGENT_DESC")
+        scenario = self._pinned_scenario(
+            agent_definition, organization, workspace,
+            snapshot={"knowledge_base": str(_kb.id)},  # no 'description' key
+        )
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=["7c23b7c0-0fc4-4a4f-b3f3-693efd733453"],
+        ) as mock_subset:
+            build_agent_kb_payload(agent_definition, "", scenario=scenario)
+        assert mock_subset.call_args.args[0] == ""
+        assert mock_subset.call_args.args[0] != "LIVE_AGENT_DESC"
+
+    def test_empty_everywhere_passes_empty_string(
+        self, db, agent_definition, organization, _kb
+    ):
+        """No description anywhere: empty string reaches subset. Downstream returns [] -> None."""
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        self._agent_with_kb_and_desc(agent_definition, _kb, "")
+        with patch(
+            "model_hub.utils.kb_indexer.KBIndexer.get_subset_kb_id",
+            return_value=[],
+        ) as mock_subset:
+            payload = build_agent_kb_payload(agent_definition, "")
+        assert mock_subset.call_args.args[0] == ""
+        assert payload is None
+
+
+class TestBuildAgentKbPayloadNonUuidGuard:
+    """Regression: non-UUID agent_or_id must not propagate a ValidationError up."""
+
+    def test_non_uuid_string_returns_none(self, db):
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        assert build_agent_kb_payload("not-a-uuid-at-all", "any") is None
+
+    def test_integer_agent_or_id_returns_none(self, db):
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        assert build_agent_kb_payload(12345, "any") is None
+
+    def test_none_agent_or_id_short_circuits(self, db):
+        from model_hub.utils.kb_indexer import build_agent_kb_payload
+
+        assert build_agent_kb_payload(None, "any") is None
+
+
 class TestColumnDefinitionSerializerProperty:
     """Regression: custom_columns[*].property must reach the request payload."""
 
@@ -1918,6 +2057,42 @@ class TestApplyCustomColumnConstraints:
         )
         assert constraints[0]["content"] == expected
 
+    def test_content_string_without_footer(self):
+        """Outer caller path passes no footer; string must end at 'below.' with no trailing garbage."""
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        constraints, schema = [], {}
+        apply_custom_column_constraints(
+            constraints, schema,
+            [{"name": "tone", "data_type": "text", "description": "customer tone"}],
+            "Alice",
+        )
+        expected = (
+            "customer tone. Generate realistic and contextually relevant data "
+            "for Alice scenarios that can be tailored using the conversation "
+            "branch information below."
+        )
+        assert constraints[0]["content"] == expected
+
+    def test_multiple_columns_all_landed(self):
+        """Loop invariant: N columns -> N constraint entries + N schema entries."""
+        from simulate.utils.scenario_constraints import apply_custom_column_constraints
+
+        cols = [
+            {"name": "urgency", "data_type": "text"},
+            {"name": "score", "data_type": "number"},
+            {"name": "tags", "data_type": "array"},
+        ]
+        constraints, schema = [], {}
+        apply_custom_column_constraints(constraints, schema, cols, "Bot")
+        assert len(constraints) == 3
+        assert [c["field"] for c in constraints] == ["urgency", "score", "tags"]
+        assert schema == {
+            "urgency": {"type": "text"},
+            "score": {"type": "number"},
+            "tags": {"type": "array"},
+        }
+
     def test_schema_entry_added(self):
         from simulate.utils.scenario_constraints import apply_custom_column_constraints
 
@@ -1928,3 +2103,111 @@ class TestApplyCustomColumnConstraints:
         )
         assert schema["urgency"] == {"type": "text"}
         assert schema["persona"] == {"type": "json"}
+
+
+class TestEffectivePersonaIds:
+    def test_auto_true_drops_user_personas(self):
+        from tfc.temporal.simulate.activities import _effective_persona_ids
+
+        assert _effective_persona_ids({
+            "add_persona_automatically": True,
+            "personas": ["p1", "p2"],
+        }) == []
+
+    def test_auto_true_no_personas(self):
+        from tfc.temporal.simulate.activities import _effective_persona_ids
+
+        assert _effective_persona_ids({"add_persona_automatically": True}) == []
+
+    def test_auto_false_keeps_user_personas(self):
+        from tfc.temporal.simulate.activities import _effective_persona_ids
+
+        assert _effective_persona_ids({
+            "add_persona_automatically": False,
+            "personas": ["p1", "p2"],
+        }) == ["p1", "p2"]
+
+    def test_auto_absent_defaults_to_false(self):
+        from tfc.temporal.simulate.activities import _effective_persona_ids
+
+        assert _effective_persona_ids({"personas": ["p1"]}) == ["p1"]
+
+    def test_empty_validated_data(self):
+        from tfc.temporal.simulate.activities import _effective_persona_ids
+
+        assert _effective_persona_ids({}) == []
+
+
+class TestResolveScenarioAgent:
+    """Unification path: agent_definition scenarios return the real model;
+    prompt-workbench scenarios return a SimpleNamespace adapter with the
+    same fields the downstream code reads via getattr / pinned_or_live."""
+
+    def test_agent_definition_source_returns_real_instance(
+        self, db, agent_definition, organization, workspace
+    ):
+        from tfc.temporal.simulate.activities import _resolve_scenario_agent
+
+        scenario = Scenarios.objects.create(
+            name="s", source="x",
+            scenario_type=Scenarios.ScenarioTypes.GRAPH,
+            organization=organization, workspace=workspace,
+            agent_definition=agent_definition, metadata={},
+        )
+        resolved = _resolve_scenario_agent(scenario, "agent_definition")
+        assert resolved is agent_definition
+
+    def test_prompt_source_returns_simplenamespace_adapter(
+        self, db, organization, workspace
+    ):
+        import types
+        from model_hub.models.run_prompt import PromptTemplate, PromptVersion
+        from tfc.temporal.simulate.activities import _resolve_scenario_agent
+
+        template = PromptTemplate.objects.create(
+            name="pt", organization=organization, workspace=workspace,
+        )
+        PromptVersion.objects.create(
+            original_template_id=template.id,
+            template_version="v1",
+            is_default=True,
+            prompt_config_snapshot={
+                "messages": [
+                    {"role": "system", "content": [{"type": "text", "text": "You are a helper."}]}
+                ]
+            },
+        )
+        scenario = Scenarios.objects.create(
+            name="s", source="x",
+            scenario_type=Scenarios.ScenarioTypes.GRAPH,
+            organization=organization, workspace=workspace,
+            source_type="prompt",
+            prompt_template=template,
+            metadata={},
+        )
+        resolved = _resolve_scenario_agent(scenario, "prompt")
+        assert isinstance(resolved, types.SimpleNamespace)
+        assert resolved.agent_name == "pt"
+        assert "You are a helper." in resolved.description
+        assert resolved.agent_type == "text"
+        assert resolved.inbound is True
+        assert resolved.languages == ["en"]
+        assert resolved.organization == organization
+        assert resolved.workspace == workspace
+
+    def test_prompt_source_with_no_template_falls_through(
+        self, db, agent_definition, organization, workspace
+    ):
+        """When source_type='prompt' but prompt_template is None, helper returns scenario.agent_definition."""
+        from tfc.temporal.simulate.activities import _resolve_scenario_agent
+
+        scenario = Scenarios.objects.create(
+            name="s", source="x",
+            scenario_type=Scenarios.ScenarioTypes.GRAPH,
+            organization=organization, workspace=workspace,
+            source_type="prompt",
+            agent_definition=agent_definition,
+            metadata={},
+        )
+        resolved = _resolve_scenario_agent(scenario, "prompt")
+        assert resolved is agent_definition

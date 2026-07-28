@@ -38,7 +38,13 @@ def has_version_pin(scenario: Any) -> bool:
 
 
 def resolve_configuration_snapshot(scenario: Any) -> dict[str, Any] | None:
-    """Return the pinned AgentVersion.configuration_snapshot for a scenario, or None."""
+    """Return the pinned AgentVersion.configuration_snapshot for a scenario, or None.
+
+    The returned dict is Django's cached JSONField value on the fetched
+    AgentVersion instance. Callers must treat it as read-only; mutating it
+    corrupts the ORM instance for the rest of the request lifetime. Every
+    caller in this codebase uses `.get(...)` and never assigns keys.
+    """
     version_id = _pinned_version_id(scenario)
     if not version_id:
         return None
